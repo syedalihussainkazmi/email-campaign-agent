@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { auth, getDecryptedGoogleAccount } from "@/auth/auth";
 import { AuthedShell } from "@/components/layout/authed-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -5,7 +6,11 @@ import { Badge } from "@/components/ui/badge";
 
 export default async function SettingsPage() {
   const session = await auth();
-  const account = await getDecryptedGoogleAccount(session!.user.id);
+  if (!session?.user) {
+    redirect("/");
+  }
+
+  const account = await getDecryptedGoogleAccount(session.user.id);
 
   return (
     <AuthedShell>
@@ -17,7 +22,7 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           {account ? (
-            <Badge variant="success">Connected as {session!.user.email}</Badge>
+            <Badge variant="success">Connected as {session.user.email}</Badge>
           ) : (
             <Badge variant="destructive">Not connected — please reconnect Gmail</Badge>
           )}

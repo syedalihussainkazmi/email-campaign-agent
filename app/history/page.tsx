@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { auth } from "@/auth/auth";
 import { AuthedShell } from "@/components/layout/authed-shell";
 import { listCampaigns } from "@/services/campaign-service";
@@ -14,7 +15,11 @@ const STATUS_VARIANT = {
 
 export default async function HistoryPage() {
   const session = await auth();
-  const { items } = await listCampaigns(session!.user.id);
+  if (!session?.user) {
+    redirect("/");
+  }
+
+  const { items } = await listCampaigns(session.user.id);
 
   return (
     <AuthedShell>
