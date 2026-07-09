@@ -2,6 +2,8 @@ import { auth, signIn } from "@/auth/auth";
 import { AuthedShell } from "@/components/layout/authed-shell";
 import { CampaignCard } from "@/components/campaign/campaign-card";
 import { Button } from "@/components/ui/button";
+import { devSignInAction } from "@/actions/dev-auth-actions";
+import { isDevLoginEnabled } from "@/utils/dev-login";
 
 export default async function HomePage() {
   const session = await auth();
@@ -25,6 +27,14 @@ export default async function HomePage() {
             Connect Gmail
           </Button>
         </form>
+
+        {isDevLoginEnabled() && (
+          <form action={devSignInAction}>
+            <Button type="submit" size="sm" variant="ghost">
+              Preview as Test User (dev only, no Gmail needed)
+            </Button>
+          </form>
+        )}
       </div>
     );
   }
