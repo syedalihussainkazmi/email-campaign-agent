@@ -40,6 +40,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           prompt: "consent",
         },
       },
+      // Google is the only sign-in method this app supports, so there's no
+      // risk of a different provider spoofing the same email address;
+      // this lets a user re-link Gmail (e.g. after a token/key rotation)
+      // without Auth.js blocking it as a potential account-takeover attempt.
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   callbacks: {
