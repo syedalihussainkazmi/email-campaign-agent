@@ -11,7 +11,9 @@ const createCampaignSchema = z.object({
   subject: z.string().min(1).max(300),
   bodyHtml: z.string().min(1),
   bodyText: z.string().optional(),
-  recipientEmails: z.array(z.string().email()).min(1),
+  recipients: z
+    .array(z.object({ email: z.string().email(), name: z.string().default("") }))
+    .min(1),
 });
 
 export async function createAndStartCampaignAction(input: z.infer<typeof createCampaignSchema>) {

@@ -25,7 +25,7 @@ export function EmailEditor({ subject, onSubjectChange, body, onBodyChange }: Em
         onChange={(e) => onSubjectChange(e.target.value)}
       />
       <Textarea
-        placeholder="Write your email…"
+        placeholder="Write your email… Use {name} or {business name} to personalize per recipient."
         rows={10}
         value={body}
         onChange={(e) => onBodyChange(e.target.value)}
@@ -33,6 +33,7 @@ export function EmailEditor({ subject, onSubjectChange, body, onBodyChange }: Em
       <div className="flex gap-4 text-xs text-zinc-500">
         <span>{characterCount} characters</span>
         <span>~{readTimeMinutes} min read</span>
+        <span>Your saved signature is appended automatically</span>
       </div>
     </div>
   );

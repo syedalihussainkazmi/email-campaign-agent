@@ -1,6 +1,8 @@
 import { prisma } from "@/database/prisma";
 import { getEmailSender } from "@/services/email-sender";
+import { getSignature } from "@/services/signature-service";
 import { randomDelaySeconds, sleep } from "@/utils/delay";
+import { renderTemplate } from "@/utils/template";
 
 const activeRunners = new Set<string>();
 
@@ -24,6 +26,9 @@ export async function startCampaignRunner(campaignId: string) {
 
     const sender = getEmailSender();
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    const signature = await getSignature(campaign.userId);
+    const signatureHtml = signature ? `<br/><br/>${signature.replace(/\n/g, "<br/>")}` : "";
+    const signatureText = signature ? `\n\n${signature}` : "";
 
     while (true) {
       const fresh = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
@@ -60,11 +65,14 @@ export async function startCampaignRunner(campaignId: string) {
         data: { status: "sending" },
       });
 
+      const businessName = next.recipient.name;
       const result = await sender.send(campaign.userId, {
         to: next.recipient.email,
-        subject: campaign.subject,
-        bodyHtml: campaign.bodyHtml,
-        bodyText: campaign.bodyText ?? undefined,
+        subject: renderTemplate(campaign.subject, businessName),
+        bodyHtml: renderTemplate(campaign.bodyHtml, businessName) + signatureHtml,
+        bodyText: campaign.bodyText
+          ? renderTemplate(campaign.bodyText, businessName) + signatureText
+          : undefined,
       });
 
       await prisma.$transaction([

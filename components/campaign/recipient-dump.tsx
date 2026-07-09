@@ -7,9 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useRecipientStore } from "@/store/recipient-store";
+import type { ParsedRecipient } from "@/services/recipient-service";
 
 const CHIP_ROW_HEIGHT = 40;
-const CHIPS_PER_ROW = 4;
+const CHIPS_PER_ROW = 3;
 
 export function RecipientDump() {
   const [draft, setDraft] = useState("");
@@ -17,7 +18,7 @@ export function RecipientDump() {
     useRecipientStore();
 
   const rows = useMemo(() => {
-    const chunked: string[][] = [];
+    const chunked: ParsedRecipient[][] = [];
     for (let i = 0; i < valid.length; i += CHIPS_PER_ROW) {
       chunked.push(valid.slice(i, i + CHIPS_PER_ROW));
     }
@@ -41,8 +42,12 @@ export function RecipientDump() {
   return (
     <div className="flex flex-col gap-3">
       <Textarea
-        placeholder="Paste email addresses — any format, one or thousands, we'll sort them out."
-        rows={4}
+        placeholder={
+          "One per line. Plain emails work, or pair with a business name for {name} personalization:\n" +
+          "Acme Corp, john@acme.com\n" +
+          "jane@beta.com - Beta LLC"
+        }
+        rows={5}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={handlePaste}
@@ -71,16 +76,17 @@ export function RecipientDump() {
                 className="absolute left-0 top-0 flex w-full flex-wrap gap-2"
                 style={{ transform: `translateY(${virtualRow.start}px)`, height: CHIP_ROW_HEIGHT }}
               >
-                {rows[virtualRow.index].map((email) => (
+                {rows[virtualRow.index].map((recipient) => (
                   <span
-                    key={email}
+                    key={recipient.email}
                     className="group flex items-center gap-1.5 rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-200"
+                    title={recipient.email}
                   >
-                    {email}
+                    {recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email}
                     <button
                       type="button"
-                      aria-label={`Remove ${email}`}
-                      onClick={() => remove(email)}
+                      aria-label={`Remove ${recipient.email}`}
+                      onClick={() => remove(recipient.email)}
                       className="opacity-0 transition-opacity group-hover:opacity-100"
                     >
                       <X className="h-3 w-3" />

@@ -15,7 +15,7 @@ export function CampaignCard() {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const validEmails = useRecipientStore((s) => s.valid);
+  const recipients = useRecipientStore((s) => s.valid);
   const clearAll = useRecipientStore((s) => s.clearAll);
 
   async function handleSend() {
@@ -25,7 +25,7 @@ export function CampaignCard() {
       setError("Subject and body are required.");
       return;
     }
-    if (validEmails.length === 0) {
+    if (recipients.length === 0) {
       setError("Add at least one valid recipient.");
       return;
     }
@@ -36,7 +36,7 @@ export function CampaignCard() {
         subject,
         bodyHtml: body.replace(/\n/g, "<br/>"),
         bodyText: body,
-        recipientEmails: validEmails,
+        recipients,
       });
       setActiveCampaignId(campaignId);
       clearAll();

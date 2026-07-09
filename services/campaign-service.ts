@@ -1,17 +1,17 @@
 import { prisma } from "@/database/prisma";
-import { dedupeEmails } from "@/services/recipient-service";
+import { dedupeRecipients, type ParsedRecipient } from "@/services/recipient-service";
 
 export interface CreateCampaignInput {
   userId: string;
   subject: string;
   bodyHtml: string;
   bodyText?: string;
-  recipientEmails: string[];
+  recipients: ParsedRecipient[];
 }
 
 /** Creates a draft campaign, upserting each recipient into the user's reusable recipient pool. */
 export async function createCampaign(input: CreateCampaignInput) {
-  const emails = dedupeEmails(input.recipientEmails);
+  const recipients = dedupeRecipients(input.recipients);
 
   return prisma.$transaction(async (tx) => {
     const campaign = await tx.campaign.create({
@@ -20,15 +20,15 @@ export async function createCampaign(input: CreateCampaignInput) {
         subject: input.subject,
         bodyHtml: input.bodyHtml,
         bodyText: input.bodyText,
-        totalCount: emails.length,
+        totalCount: recipients.length,
       },
     });
 
-    for (const email of emails) {
+    for (const { email, name } of recipients) {
       const recipient = await tx.recipient.upsert({
         where: { userId_email: { userId: input.userId, email } },
-        update: {},
-        create: { userId: input.userId, email },
+        update: name ? { name } : {},
+        create: { userId: input.userId, email, name },
       });
 
       await tx.campaignRecipient.create({
