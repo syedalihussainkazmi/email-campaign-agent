@@ -3,6 +3,7 @@ import { getEmailSender } from "@/services/email-sender";
 import { getSignature } from "@/services/signature-service";
 import { randomDelaySeconds, sleep } from "@/utils/delay";
 import { renderTemplate } from "@/utils/template";
+import { looksLikeHtml, stripHtml } from "@/utils/html";
 
 const activeRunners = new Set<string>();
 
@@ -27,8 +28,11 @@ export async function startCampaignRunner(campaignId: string) {
     const sender = getEmailSender();
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
     const signature = await getSignature(campaign.userId);
-    const signatureHtml = signature ? `<br/><br/>${signature.replace(/\n/g, "<br/>")}` : "";
-    const signatureText = signature ? `\n\n${signature}` : "";
+    const signatureIsHtml = looksLikeHtml(signature);
+    const signatureHtml = signature
+      ? `<br/><br/>${signatureIsHtml ? signature : signature.replace(/\n/g, "<br/>")}`
+      : "";
+    const signatureText = signature ? `\n\n${signatureIsHtml ? stripHtml(signature) : signature}` : "";
 
     while (true) {
       const fresh = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
