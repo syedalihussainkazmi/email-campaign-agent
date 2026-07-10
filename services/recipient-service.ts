@@ -14,11 +14,13 @@ export interface ParsedRecipients {
 
 /**
  * Parses pasted recipient text one line at a time. Each line may be a bare
- * email, or an email paired with a business/contact name in any common
- * format ("Acme Corp, john@acme.com", "john@acme.com - Acme Corp",
- * "Acme Corp <john@acme.com>"). Lines containing multiple emails are treated
- * as a flat list (no name, since attribution would be ambiguous). Results
- * are bucketed into valid / invalid / duplicate, normalizing email case.
+ * email, or one or more emails paired with a shared business/contact name in
+ * any common format ("Acme Corp, john@acme.com", "john@acme.com - Acme Corp",
+ * "Acme Corp <john@acme.com>", "Acme Corp: john@acme.com, sales@acme.com" for
+ * a business with several addresses). Whatever text remains on the line
+ * after stripping every email is treated as the name and applied to all of
+ * them. Results are bucketed into valid / invalid / duplicate, normalizing
+ * email case.
  */
 export function parseRecipients(rawText: string): ParsedRecipients {
   const lines = rawText
@@ -39,21 +41,14 @@ export function parseRecipients(rawText: string): ParsedRecipients {
       continue;
     }
 
-    if (matches.length > 1) {
-      for (const raw of matches) {
-        addRecipient(raw.toLowerCase(), "");
-      }
-      continue;
-    }
+    const name = matches
+      .reduce((remainder, match) => remainder.replace(match, ""), line)
+      .replace(NAME_TRIM_CHARS, "")
+      .trim();
 
-    const email = matches[0].toLowerCase();
-    if (!isValidEmail(email)) {
-      invalid.push(line);
-      continue;
+    for (const raw of matches) {
+      addRecipient(raw.toLowerCase(), name);
     }
-
-    const name = line.replace(matches[0], "").replace(NAME_TRIM_CHARS, "").trim();
-    addRecipient(email, name);
   }
 
   function addRecipient(email: string, name: string) {

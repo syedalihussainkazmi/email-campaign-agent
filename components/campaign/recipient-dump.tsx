@@ -45,7 +45,8 @@ export function RecipientDump() {
         placeholder={
           "One per line. Plain emails work, or pair with a business name for {name} personalization:\n" +
           "Acme Corp, john@acme.com\n" +
-          "jane@beta.com - Beta LLC"
+          "jane@beta.com - Beta LLC\n" +
+          "Gamma Inc: sales@gamma.com, info@gamma.com"
         }
         rows={5}
         value={draft}

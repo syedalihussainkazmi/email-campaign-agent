@@ -22,11 +22,22 @@ describe("parseRecipients", () => {
     ]);
   });
 
-  it("treats multi-email lines as a flat, nameless list", () => {
+  it("treats a nameless multi-email line as a flat, nameless list", () => {
     const result = parseRecipients("john@gmail.com, alice@gmail.com");
     expect(result.valid).toEqual([
       { email: "john@gmail.com", name: "" },
       { email: "alice@gmail.com", name: "" },
+    ]);
+  });
+
+  it("applies one business name to every email on the same line", () => {
+    const result = parseRecipients(
+      "Acme Corp: john@acme.com, sales@acme.com, info@acme.com",
+    );
+    expect(result.valid).toEqual([
+      { email: "john@acme.com", name: "Acme Corp" },
+      { email: "sales@acme.com", name: "Acme Corp" },
+      { email: "info@acme.com", name: "Acme Corp" },
     ]);
   });
 
