@@ -20,4 +20,15 @@ describe("renderTemplate", () => {
   it("replaces multiple occurrences", () => {
     expect(renderTemplate("{name}... yes {name}!", "Acme")).toBe("Acme... yes Acme!");
   });
+
+  it("also replaces square-bracket placeholders like [Business Name]", () => {
+    expect(renderTemplate("Saw [Business Name] doesn't have a website", "Acme Corp")).toBe(
+      "Saw Acme Corp doesn't have a website",
+    );
+    expect(renderTemplate("Hey [name]!", "Acme Corp")).toBe("Hey Acme Corp!");
+  });
+
+  it("leaves unrecognized bracket placeholders untouched", () => {
+    expect(renderTemplate("Hi [unknown]", "Acme")).toBe("Hi [unknown]");
+  });
 });
