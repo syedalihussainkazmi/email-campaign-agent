@@ -4,6 +4,7 @@ import { CampaignCard } from "@/components/campaign/campaign-card";
 import { Button } from "@/components/ui/button";
 import { devSignInAction } from "@/actions/dev-auth-actions";
 import { isDevLoginEnabled } from "@/utils/dev-login";
+import { WebmailSignInForm } from "@/components/auth/webmail-signin-form";
 
 export default async function HomePage() {
   const session = await auth();
@@ -17,16 +18,20 @@ export default async function HomePage() {
             AI-assisted email campaigns, sent from your own Gmail account.
           </p>
         </div>
-        <form
-          action={async () => {
-            "use server";
-            await signIn("google");
-          }}
-        >
-          <Button type="submit" size="lg">
-            Connect Gmail
-          </Button>
-        </form>
+        <div className="flex flex-wrap items-start justify-center gap-3">
+          <form
+            action={async () => {
+              "use server";
+              await signIn("google");
+            }}
+          >
+            <Button type="submit" size="lg">
+              Connect Gmail
+            </Button>
+          </form>
+
+          <WebmailSignInForm />
+        </div>
 
         {isDevLoginEnabled() && (
           <form action={devSignInAction}>
