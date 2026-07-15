@@ -1,5 +1,5 @@
 import { prisma } from "@/database/prisma";
-import { getEmailSender } from "@/services/email-sender";
+import { getEmailSenderForUser } from "@/services/email-sender";
 import { getSignature } from "@/services/signature-service";
 import { randomDelaySeconds, sleep } from "@/utils/delay";
 import { renderTemplate } from "@/utils/template";
@@ -25,8 +25,8 @@ export async function startCampaignRunner(campaignId: string) {
       data: { status: "running", startedAt: new Date(), controlFlag: "none" },
     });
 
-    const sender = getEmailSender();
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    const sender = await getEmailSenderForUser(campaign.userId);
     const signature = await getSignature(campaign.userId);
     const signatureIsHtml = looksLikeHtml(signature);
     const signatureHtml = signature

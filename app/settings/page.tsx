@@ -4,7 +4,9 @@ import { AuthedShell } from "@/components/layout/authed-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SignatureForm } from "@/components/campaign/signature-form";
+import { SmtpForm } from "@/components/campaign/smtp-form";
 import { getSignature } from "@/services/signature-service";
+import { getSmtpConfig } from "@/services/smtp-service";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -12,9 +14,10 @@ export default async function SettingsPage() {
     redirect("/");
   }
 
-  const [account, signature] = await Promise.all([
+  const [account, signature, smtpConfig] = await Promise.all([
     getDecryptedGoogleAccount(session.user.id),
     getSignature(session.user.id),
+    getSmtpConfig(session.user.id),
   ]);
 
   return (
@@ -24,7 +27,9 @@ export default async function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Gmail Connection</CardTitle>
-            <CardDescription>MailPilot sends campaigns through this connected account.</CardDescription>
+            <CardDescription>
+              Used to send campaigns, unless a custom SMTP account is configured below.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {account ? (
@@ -32,6 +37,30 @@ export default async function SettingsPage() {
             ) : (
               <Badge variant="destructive">Not connected — please reconnect Gmail</Badge>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Custom SMTP (Webmail)</CardTitle>
+            <CardDescription>
+              Send from your own domain email (cPanel, Zoho Mail, Titan, etc.) instead of Gmail.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SmtpForm
+              initialValue={
+                smtpConfig
+                  ? {
+                      host: smtpConfig.host,
+                      port: smtpConfig.port,
+                      secure: smtpConfig.secure,
+                      username: smtpConfig.username,
+                      fromEmail: smtpConfig.fromEmail,
+                    }
+                  : null
+              }
+            />
           </CardContent>
         </Card>
 

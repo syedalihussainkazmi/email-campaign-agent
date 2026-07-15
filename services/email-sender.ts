@@ -1,4 +1,6 @@
 import { GmailEmailSender } from "@/services/gmail-service";
+import { SmtpEmailSender } from "@/services/smtp-sender";
+import { getSmtpConfig } from "@/services/smtp-service";
 
 export interface OutgoingEmail {
   to: string;
@@ -12,7 +14,7 @@ export interface SendResult {
   error?: string;
 }
 
-/** Port every email transport must implement, so swapping mock/real Gmail is a one-line config change. */
+/** Port every email transport must implement, so swapping mock/Gmail/SMTP is a one-line config change. */
 export interface EmailSenderPort {
   send(userId: string, message: OutgoingEmail): Promise<SendResult>;
 }
@@ -34,14 +36,18 @@ export class MockEmailSender implements EmailSenderPort {
   }
 }
 
-let cachedSender: EmailSenderPort | null = null;
+/**
+ * Resolves the sender for a specific user: their own custom SMTP (webmail)
+ * credentials take priority if configured, otherwise falls back to Gmail
+ * (when EMAIL_SENDER=gmail) or the mock sender for local/dev use. Sender
+ * choice is per-user rather than a single global instance, since different
+ * accounts may connect Gmail while others use their own webmail SMTP.
+ */
+export async function getEmailSenderForUser(userId: string): Promise<EmailSenderPort> {
+  const smtpConfig = await getSmtpConfig(userId);
+  if (smtpConfig) {
+    return new SmtpEmailSender(smtpConfig);
+  }
 
-/** Resolves the active sender implementation based on EMAIL_SENDER env var. */
-export function getEmailSender(): EmailSenderPort {
-  if (cachedSender) return cachedSender;
-
-  cachedSender =
-    process.env.EMAIL_SENDER === "gmail" ? new GmailEmailSender() : new MockEmailSender();
-
-  return cachedSender;
+  return process.env.EMAIL_SENDER === "gmail" ? new GmailEmailSender() : new MockEmailSender();
 }
