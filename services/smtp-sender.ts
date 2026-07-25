@@ -13,6 +13,7 @@ export class SmtpEmailSender implements EmailSenderPort {
         port: this.config.port,
         secure: this.config.secure,
         auth: { user: this.config.username, pass: this.config.password },
+        tls: { rejectUnauthorized: false },
       });
 
       await transporter.sendMail({
@@ -38,6 +39,7 @@ export async function verifySmtpConfig(config: SmtpConfig): Promise<{ ok: boolea
       port: config.port,
       secure: config.secure,
       auth: { user: config.username, pass: config.password },
+      tls: { rejectUnauthorized: false },
     });
     await transporter.verify();
     return { ok: true };
