@@ -1,9 +1,11 @@
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const NAME_TRIM_CHARS = /^[\s,;:|<>\-–—"']+|[\s,;:|<>\-–—"']+$/g;
+const NAME_SEGMENT_SPLIT = /\s+[-–—]\s+/;
 
 export interface ParsedRecipient {
   email: string;
   name: string;
+  ownerName: string;
 }
 
 export interface ParsedRecipients {
@@ -17,10 +19,11 @@ export interface ParsedRecipients {
  * email, or one or more emails paired with a shared business/contact name in
  * any common format ("Acme Corp, john@acme.com", "john@acme.com - Acme Corp",
  * "Acme Corp <john@acme.com>", "Acme Corp: john@acme.com, sales@acme.com" for
- * a business with several addresses). Whatever text remains on the line
- * after stripping every email is treated as the name and applied to all of
- * them. Results are bucketed into valid / invalid / duplicate, normalizing
- * email case.
+ * a business with several addresses). An optional second name segment
+ * separated by " - " is treated as the owner/contact's personal name
+ * ("DevXtech - Syed Kazmi - sk@devxtech.com"). Whatever remains after
+ * stripping every email is applied to all of them. Results are bucketed
+ * into valid / invalid / duplicate, normalizing email case.
  */
 export function parseRecipients(rawText: string): ParsedRecipients {
   const lines = rawText
@@ -41,17 +44,21 @@ export function parseRecipients(rawText: string): ParsedRecipients {
       continue;
     }
 
-    const name = matches
+    const leftover = matches
       .reduce((remainder, match) => remainder.replace(match, ""), line)
       .replace(NAME_TRIM_CHARS, "")
       .trim();
 
+    const segments = leftover.split(NAME_SEGMENT_SPLIT).map((s) => s.trim());
+    const name = segments[0] ?? "";
+    const ownerName = segments.length > 1 ? segments[1] : "";
+
     for (const raw of matches) {
-      addRecipient(raw.toLowerCase(), name);
+      addRecipient(raw.toLowerCase(), name, ownerName);
     }
   }
 
-  function addRecipient(email: string, name: string) {
+  function addRecipient(email: string, name: string, ownerName: string) {
     if (!isValidEmail(email)) {
       invalid.push(email);
       return;
@@ -61,7 +68,7 @@ export function parseRecipients(rawText: string): ParsedRecipients {
       return;
     }
     seen.add(email);
-    valid.push({ email, name });
+    valid.push({ email, name, ownerName });
   }
 
   return { valid, invalid, duplicates };
@@ -76,7 +83,7 @@ export function dedupeRecipients(recipients: ParsedRecipient[]): ParsedRecipient
   for (const r of recipients) {
     const email = r.email.toLowerCase();
     if (!seen.has(email)) {
-      seen.set(email, { email, name: r.name });
+      seen.set(email, { email, name: r.name, ownerName: r.ownerName });
     }
   }
   return Array.from(seen.values());

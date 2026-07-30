@@ -46,7 +46,8 @@ export function RecipientDump() {
           "One per line. Plain emails work, or pair with a business name for {name} personalization:\n" +
           "Acme Corp, john@acme.com\n" +
           "jane@beta.com - Beta LLC\n" +
-          "Gamma Inc: sales@gamma.com, info@gamma.com"
+          "Gamma Inc: sales@gamma.com, info@gamma.com\n" +
+          "DevXtech - Syed Kazmi - sk@devxtech.com  (adds {owner name}, defaults to \"there\")"
         }
         rows={5}
         value={draft}
@@ -83,7 +84,9 @@ export function RecipientDump() {
                     className="group flex items-center gap-1.5 rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-200"
                     title={recipient.email}
                   >
-                    {recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email}
+                    {[recipient.name, recipient.ownerName].filter(Boolean).join(" - ") ||
+                      recipient.email}
+                    {(recipient.name || recipient.ownerName) && ` <${recipient.email}>`}
                     <button
                       type="button"
                       aria-label={`Remove ${recipient.email}`}

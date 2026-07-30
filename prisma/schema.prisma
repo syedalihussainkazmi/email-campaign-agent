@@ -112,6 +112,7 @@ model Recipient {
   userId    String
   email     String
   name      String   @default("")
+  ownerName String   @default("")
   createdAt DateTime @default(now())
 
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)

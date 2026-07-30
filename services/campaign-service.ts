@@ -24,11 +24,11 @@ export async function createCampaign(input: CreateCampaignInput) {
       },
     });
 
-    for (const { email, name } of recipients) {
+    for (const { email, name, ownerName } of recipients) {
       const recipient = await tx.recipient.upsert({
         where: { userId_email: { userId: input.userId, email } },
-        update: name ? { name } : {},
-        create: { userId: input.userId, email, name },
+        update: { ...(name ? { name } : {}), ...(ownerName ? { ownerName } : {}) },
+        create: { userId: input.userId, email, name, ownerName },
       });
 
       await tx.campaignRecipient.create({

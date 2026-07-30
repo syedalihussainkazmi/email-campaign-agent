@@ -5,9 +5,9 @@ describe("parseRecipients", () => {
   it("extracts bare emails with no name, one per line", () => {
     const result = parseRecipients("john@gmail.com\nalice@gmail.com\nbob@yahoo.com");
     expect(result.valid).toEqual([
-      { email: "john@gmail.com", name: "" },
-      { email: "alice@gmail.com", name: "" },
-      { email: "bob@yahoo.com", name: "" },
+      { email: "john@gmail.com", name: "", ownerName: "" },
+      { email: "alice@gmail.com", name: "", ownerName: "" },
+      { email: "bob@yahoo.com", name: "", ownerName: "" },
     ]);
   });
 
@@ -16,34 +16,47 @@ describe("parseRecipients", () => {
       "Acme Corp, john@acme.com\njane@beta.com - Beta LLC\nGamma Inc <sam@gamma.com>",
     );
     expect(result.valid).toEqual([
-      { email: "john@acme.com", name: "Acme Corp" },
-      { email: "jane@beta.com", name: "Beta LLC" },
-      { email: "sam@gamma.com", name: "Gamma Inc" },
+      { email: "john@acme.com", name: "Acme Corp", ownerName: "" },
+      { email: "jane@beta.com", name: "Beta LLC", ownerName: "" },
+      { email: "sam@gamma.com", name: "Gamma Inc", ownerName: "" },
     ]);
   });
 
   it("treats a nameless multi-email line as a flat, nameless list", () => {
     const result = parseRecipients("john@gmail.com, alice@gmail.com");
     expect(result.valid).toEqual([
-      { email: "john@gmail.com", name: "" },
-      { email: "alice@gmail.com", name: "" },
+      { email: "john@gmail.com", name: "", ownerName: "" },
+      { email: "alice@gmail.com", name: "", ownerName: "" },
     ]);
   });
 
   it("applies one business name to every email on the same line", () => {
-    const result = parseRecipients(
-      "Acme Corp: john@acme.com, sales@acme.com, info@acme.com",
-    );
+    const result = parseRecipients("Acme Corp: john@acme.com, sales@acme.com, info@acme.com");
     expect(result.valid).toEqual([
-      { email: "john@acme.com", name: "Acme Corp" },
-      { email: "sales@acme.com", name: "Acme Corp" },
-      { email: "info@acme.com", name: "Acme Corp" },
+      { email: "john@acme.com", name: "Acme Corp", ownerName: "" },
+      { email: "sales@acme.com", name: "Acme Corp", ownerName: "" },
+      { email: "info@acme.com", name: "Acme Corp", ownerName: "" },
+    ]);
+  });
+
+  it("extracts an owner/contact name as a second dash-separated segment", () => {
+    const result = parseRecipients("DevXtech - Syed Kazmi - sk@devxtech.com");
+    expect(result.valid).toEqual([
+      { email: "sk@devxtech.com", name: "DevXtech", ownerName: "Syed Kazmi" },
+    ]);
+  });
+
+  it("applies the shared business + owner name to every email on the line", () => {
+    const result = parseRecipients("DevXtech - Syed Kazmi - sk@devxtech.com, sales@devxtech.com");
+    expect(result.valid).toEqual([
+      { email: "sk@devxtech.com", name: "DevXtech", ownerName: "Syed Kazmi" },
+      { email: "sales@devxtech.com", name: "DevXtech", ownerName: "Syed Kazmi" },
     ]);
   });
 
   it("flags duplicates without dropping the first occurrence", () => {
     const result = parseRecipients("a@x.com\na@x.com\nA@X.COM");
-    expect(result.valid).toEqual([{ email: "a@x.com", name: "" }]);
+    expect(result.valid).toEqual([{ email: "a@x.com", name: "", ownerName: "" }]);
     expect(result.duplicates).toHaveLength(2);
   });
 
@@ -55,7 +68,7 @@ describe("parseRecipients", () => {
 
   it("normalizes email case", () => {
     const result = parseRecipients("John@Gmail.com");
-    expect(result.valid).toEqual([{ email: "john@gmail.com", name: "" }]);
+    expect(result.valid).toEqual([{ email: "john@gmail.com", name: "", ownerName: "" }]);
   });
 });
 
@@ -73,9 +86,9 @@ describe("dedupeRecipients", () => {
   it("dedupes case-insensitively, keeping the first name seen", () => {
     expect(
       dedupeRecipients([
-        { email: "A@b.com", name: "Acme" },
-        { email: "a@b.com", name: "" },
+        { email: "A@b.com", name: "Acme", ownerName: "Syed" },
+        { email: "a@b.com", name: "", ownerName: "" },
       ]),
-    ).toEqual([{ email: "a@b.com", name: "Acme" }]);
+    ).toEqual([{ email: "a@b.com", name: "Acme", ownerName: "Syed" }]);
   });
 });

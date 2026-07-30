@@ -25,7 +25,10 @@ export function EmailEditor({ subject, onSubjectChange, body, onBodyChange }: Em
         onChange={(e) => onSubjectChange(e.target.value)}
       />
       <Textarea
-        placeholder="Write your email… Use {name} or {business name} to personalize per recipient."
+        placeholder={
+          "Write your email… Use {name} or {business name} for the business, " +
+          '{owner name} for the contact\'s name (falls back to "there" if unknown).'
+        }
         rows={10}
         value={body}
         onChange={(e) => onBodyChange(e.target.value)}

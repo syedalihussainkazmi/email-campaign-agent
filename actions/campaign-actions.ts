@@ -12,7 +12,13 @@ const createCampaignSchema = z.object({
   bodyHtml: z.string().min(1),
   bodyText: z.string().optional(),
   recipients: z
-    .array(z.object({ email: z.string().email(), name: z.string().default("") }))
+    .array(
+      z.object({
+        email: z.string().email(),
+        name: z.string().default(""),
+        ownerName: z.string().default(""),
+      }),
+    )
     .min(1),
 });
 

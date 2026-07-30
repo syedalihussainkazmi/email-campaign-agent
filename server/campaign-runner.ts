@@ -69,13 +69,13 @@ export async function startCampaignRunner(campaignId: string) {
         data: { status: "sending" },
       });
 
-      const businessName = next.recipient.name;
+      const variables = { businessName: next.recipient.name, ownerName: next.recipient.ownerName };
       const result = await sender.send(campaign.userId, {
         to: next.recipient.email,
-        subject: renderTemplate(campaign.subject, businessName),
-        bodyHtml: renderTemplate(campaign.bodyHtml, businessName) + signatureHtml,
+        subject: renderTemplate(campaign.subject, variables),
+        bodyHtml: renderTemplate(campaign.bodyHtml, variables) + signatureHtml,
         bodyText: campaign.bodyText
-          ? renderTemplate(campaign.bodyText, businessName) + signatureText
+          ? renderTemplate(campaign.bodyText, variables) + signatureText
           : undefined,
       });
 
