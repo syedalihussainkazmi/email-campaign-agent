@@ -1,6 +1,9 @@
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const NAME_TRIM_CHARS = /^[\s,;:|<>\-–—"']+|[\s,;:|<>\-–—"']+$/g;
-const NAME_SEGMENT_SPLIT = /\s+[-–—]\s+/;
+// Requires whitespace on at least one side of the dash, so a genuine
+// hyphenated business name ("Coca-Cola", no spaces at all) never gets
+// split, but a loosely-typed separator ("DevXtech- Syed Kazmi") still does.
+const NAME_SEGMENT_SPLIT = /\s+[-–—]\s*|\s*[-–—]\s+/;
 
 export interface ParsedRecipient {
   email: string;

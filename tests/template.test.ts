@@ -41,6 +41,11 @@ describe("renderTemplate", () => {
     expect(renderTemplate("Hey {owner}!", vars("Acme Corp", "Syed Kazmi"))).toBe("Hey Syed Kazmi!");
   });
 
+  it("recognizes {First Name} / {fname} as the standard mail-merge aliases", () => {
+    expect(renderTemplate("Hi {First Name},", vars("Acme Corp", "Syed"))).toBe("Hi Syed,");
+    expect(renderTemplate("Hi {fname},", vars("Acme Corp"))).toBe("Hi there,");
+  });
+
   it('falls back to "there" for {owner name} when no owner name is known', () => {
     expect(renderTemplate("Hey {owner name},", vars("Acme Corp"))).toBe("Hey there,");
   });

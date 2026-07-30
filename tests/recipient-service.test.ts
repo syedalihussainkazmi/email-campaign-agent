@@ -54,6 +54,20 @@ describe("parseRecipients", () => {
     ]);
   });
 
+  it("splits the owner name even without a space before the dash", () => {
+    const result = parseRecipients("DevXtech- Syed Kazmi - sk@devxtech.com");
+    expect(result.valid).toEqual([
+      { email: "sk@devxtech.com", name: "DevXtech", ownerName: "Syed Kazmi" },
+    ]);
+  });
+
+  it("does not split a genuinely hyphenated business name with no owner", () => {
+    const result = parseRecipients("Coca-Cola, john@coca-cola.com");
+    expect(result.valid).toEqual([
+      { email: "john@coca-cola.com", name: "Coca-Cola", ownerName: "" },
+    ]);
+  });
+
   it("flags duplicates without dropping the first occurrence", () => {
     const result = parseRecipients("a@x.com\na@x.com\nA@X.COM");
     expect(result.valid).toEqual([{ email: "a@x.com", name: "", ownerName: "" }]);
