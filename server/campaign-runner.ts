@@ -69,7 +69,7 @@ export async function startCampaignRunner(campaignId: string) {
         data: { status: "sending" },
       });
 
-      const variables = { businessName: next.recipient.name, ownerName: next.recipient.ownerName };
+      const variables = { businessName: next.name, ownerName: next.ownerName };
       const result = await sender.send(campaign.userId, {
         to: next.recipient.email,
         subject: renderTemplate(campaign.subject, variables),

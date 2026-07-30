@@ -125,6 +125,8 @@ model CampaignRecipient {
   id          String                   @id @default(cuid())
   campaignId  String
   recipientId String
+  name        String                   @default("")
+  ownerName   String                   @default("")
   status      CampaignRecipientStatus  @default(pending)
   sentAt      DateTime?
   error       String?

@@ -9,7 +9,15 @@ export interface CreateCampaignInput {
   recipients: ParsedRecipient[];
 }
 
-/** Creates a draft campaign, upserting each recipient into the user's reusable recipient pool. */
+/**
+ * Creates a draft campaign. Each recipient's name/owner name is snapshotted
+ * directly onto its CampaignRecipient row from exactly what was pasted for
+ * THIS campaign — personalization at send time reads that snapshot, never
+ * the shared Recipient pool, so an older campaign's name for a reused email
+ * address can never silently leak into a later one that didn't specify it.
+ * The shared Recipient pool is still updated opportunistically (only when a
+ * non-empty value is given) purely as a convenience/dedup record.
+ */
 export async function createCampaign(input: CreateCampaignInput) {
   const recipients = dedupeRecipients(input.recipients);
 
@@ -32,7 +40,7 @@ export async function createCampaign(input: CreateCampaignInput) {
       });
 
       await tx.campaignRecipient.create({
-        data: { campaignId: campaign.id, recipientId: recipient.id },
+        data: { campaignId: campaign.id, recipientId: recipient.id, name, ownerName },
       });
     }
 
