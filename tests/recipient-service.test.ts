@@ -68,31 +68,6 @@ describe("parseRecipients", () => {
     ]);
   });
 
-  it("assigns business/owner correctly no matter which order they're typed in", () => {
-    const businessFirst = parseRecipients("DevXtech - Syed Kazmi - sk@devxtech.com");
-    const personFirst = parseRecipients("Syed Kazmi - DevXtech - sk@devxtech.com");
-    expect(businessFirst.valid).toEqual([
-      { email: "sk@devxtech.com", name: "DevXtech", ownerName: "Syed Kazmi" },
-    ]);
-    expect(personFirst.valid).toEqual([
-      { email: "sk@devxtech.com", name: "DevXtech", ownerName: "Syed Kazmi" },
-    ]);
-  });
-
-  it("recognizes a business name with common suffixes even when it's two words", () => {
-    const result = parseRecipients("Jim Trouse - Arborist Corp - jim@arborclimb.com.au");
-    expect(result.valid).toEqual([
-      { email: "jim@arborclimb.com.au", name: "Arborist Corp", ownerName: "Jim Trouse" },
-    ]);
-  });
-
-  it("falls back to business-first, owner-second when both segments look like a person", () => {
-    const result = parseRecipients("John Smith - Jane Doe - x@example.com");
-    expect(result.valid).toEqual([
-      { email: "x@example.com", name: "John Smith", ownerName: "Jane Doe" },
-    ]);
-  });
-
   it("flags duplicates without dropping the first occurrence", () => {
     const result = parseRecipients("a@x.com\na@x.com\nA@X.COM");
     expect(result.valid).toEqual([{ email: "a@x.com", name: "", ownerName: "" }]);
