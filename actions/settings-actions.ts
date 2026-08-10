@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { requireSession } from "@/auth/session";
 import { setSignature } from "@/services/signature-service";
-import { setSmtpConfig, clearSmtpConfig, getSmtpConfig } from "@/services/smtp-service";
+import { createSmtpAccount, deleteSmtpAccount } from "@/services/smtp-service";
 import { verifySmtpConfig } from "@/services/smtp-sender";
 import { revalidatePath } from "next/cache";
 
@@ -19,43 +19,35 @@ export async function saveSignatureAction(input: z.infer<typeof signatureSchema>
   return { ok: true };
 }
 
-const smtpConfigSchema = z.object({
+const smtpAccountSchema = z.object({
+  label: z.string().min(1),
   host: z.string().min(1),
   port: z.coerce.number().int().min(1).max(65535),
   secure: z.boolean(),
   username: z.string().min(1),
-  password: z.string(),
+  password: z.string().min(1),
   fromEmail: z.string().email(),
+  mailboxAgeStartDate: z.coerce.date(),
+  dailyCapOverride: z.coerce.number().int().min(1).optional(),
 });
 
-export async function saveSmtpConfigAction(input: z.infer<typeof smtpConfigSchema>) {
+export async function addSmtpAccountAction(input: z.infer<typeof smtpAccountSchema>) {
   const session = await requireSession();
-  const parsed = smtpConfigSchema.parse(input);
+  const parsed = smtpAccountSchema.parse(input);
 
-  let password = parsed.password;
-  if (!password) {
-    const existing = await getSmtpConfig(session.user.id);
-    if (!existing) {
-      return { ok: false, error: "Password is required" };
-    }
-    password = existing.password;
-  }
-
-  const config = { ...parsed, password };
-  const verification = await verifySmtpConfig(config);
+  const verification = await verifySmtpConfig(parsed);
   if (!verification.ok) {
     return { ok: false, error: verification.error ?? "Could not connect with these SMTP settings" };
   }
 
-  await setSmtpConfig(session.user.id, config);
+  await createSmtpAccount(session.user.id, parsed);
   revalidatePath("/settings");
-
   return { ok: true };
 }
 
-export async function disconnectSmtpAction() {
+export async function removeSmtpAccountAction(accountId: string) {
   const session = await requireSession();
-  await clearSmtpConfig(session.user.id);
+  await deleteSmtpAccount(accountId, session.user.id);
   revalidatePath("/settings");
   return { ok: true };
 }

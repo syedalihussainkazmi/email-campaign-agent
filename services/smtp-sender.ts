@@ -1,6 +1,15 @@
 import nodemailer from "nodemailer";
 import type { EmailSenderPort, OutgoingEmail, SendResult } from "@/services/email-sender";
-import type { SmtpConfig } from "@/services/smtp-service";
+
+/** The minimal connection details needed to actually send/verify — a subset of SmtpAccountInput. */
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  password: string;
+  fromEmail: string;
+}
 
 /** Sends via any standard SMTP account (cPanel, Zoho Mail, Titan, custom domain webmail, etc). */
 export class SmtpEmailSender implements EmailSenderPort {

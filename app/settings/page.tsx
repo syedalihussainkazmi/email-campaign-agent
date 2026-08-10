@@ -3,9 +3,9 @@ import { auth } from "@/auth/session";
 import { AuthedShell } from "@/components/layout/authed-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { SignatureForm } from "@/components/campaign/signature-form";
-import { SmtpForm } from "@/components/campaign/smtp-form";
+import { SmtpAccountList } from "@/components/campaign/smtp-account-list";
 import { getSignature } from "@/services/signature-service";
-import { getSmtpConfig } from "@/services/smtp-service";
+import { listSmtpAccounts } from "@/services/smtp-service";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -13,9 +13,9 @@ export default async function SettingsPage() {
     redirect("/");
   }
 
-  const [signature, smtpConfig] = await Promise.all([
+  const [signature, accounts] = await Promise.all([
     getSignature(session.user.id),
-    getSmtpConfig(session.user.id),
+    listSmtpAccounts(session.user.id),
   ]);
 
   return (
@@ -24,25 +24,11 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Webmail (SMTP)</CardTitle>
-            <CardDescription>
-              The account campaigns send from — your own domain email (cPanel, Zoho Mail, Titan, etc.).
-            </CardDescription>
+            <CardTitle>Email Accounts</CardTitle>
+            <CardDescription>Connect as many webmail accounts as you want to send from.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SmtpForm
-              initialValue={
-                smtpConfig
-                  ? {
-                      host: smtpConfig.host,
-                      port: smtpConfig.port,
-                      secure: smtpConfig.secure,
-                      username: smtpConfig.username,
-                      fromEmail: smtpConfig.fromEmail,
-                    }
-                  : null
-              }
-            />
+            <SmtpAccountList accounts={accounts} />
           </CardContent>
         </Card>
 
