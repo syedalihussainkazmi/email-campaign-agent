@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/auth/auth";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/brand/logo";
 
 export async function TopNav() {
   const session = await auth();
@@ -8,7 +9,7 @@ export async function TopNav() {
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/80 px-6 py-3 backdrop-blur-sm">
       <div className="flex items-center gap-6">
-        <span className="text-sm font-semibold tracking-tight text-zinc-100">MailPilot</span>
+        <Logo />
         {session?.user?.email && (
           <span className="text-xs text-zinc-500">{session.user.email}</span>
         )}

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MailPilot",
-  description: "AI-powered email campaign manager",
+  title: "MailPilot by DevXtech",
+  description: "AI-powered email campaign manager — a DevXtech product (devxtech.com)",
 };
 
 export default function RootLayout({
