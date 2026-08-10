@@ -53,6 +53,10 @@ This plan covers four subsystems that depend on each other in sequence (auth cle
 | `services/unsubscribe-service.ts` | New. Pure `buildUnsubscribeHeaders`, plus DB-backed lookup/mark-unsubscribed functions. |
 | `app/api/unsubscribe/[token]/route.ts` | New. GET (human click) and POST (RFC 8058 one-click) both mark the recipient unsubscribed. |
 | `services/sending-window-service.ts` | New. Pure `isWithinSendingWindow`, plus a per-user Setting for the configured window. |
+| `utils/motion.ts` | New. Shared framer-motion timing/easing tokens and panel-transition variants. |
+| `components/ui/progress.tsx` | Rewritten to animate via `scaleX` transform instead of `width`, avoiding layout thrash. |
+| `components/ui/button.tsx` | Adds press-scale feedback (needs `transform` added to the transitioned properties). |
+| `components/ui/skeleton.tsx` | New. Shared pulsing loading placeholder for the calculator panels. |
 | `app/page.tsx` | Gmail button + dev-login button removed; only the webmail form remains (no longer collapsible — it's the only option). |
 
 ---
@@ -3067,6 +3071,150 @@ git commit -m "Add configurable business-hours sending window"
 
 ---
 
+### Task 19: Motion, polish, and performance
+
+**Files:**
+- Create: `utils/motion.ts`
+- Modify: `components/ui/progress.tsx`
+- Modify: `components/ui/button.tsx`
+- Create: `components/ui/skeleton.tsx`
+- Modify: `components/campaign/send-plan-panel.tsx`, `components/campaign/rollout-planner-panel.tsx`, `components/campaign/capacity-timeline-panel.tsx`
+
+**This environment doesn't have the design-system database installed** (only its guideline reference), so the concrete numbers below come directly from that reference rather than a generated palette — durations, easing, and contrast ratios are real, sourced values, not invented.
+
+**Scope decision, stated up front**: the recipient chip list (`recipient-dump.tsx`) stays un-animated per-item. It's virtualized via `@tanstack/react-virtual`, which recycles DOM nodes at fixed computed positions — layering enter/exit/stagger animation on top of that risks visual glitches (recycled nodes replaying animations, momentarily wrong positions) for a dense data list where that kind of delight isn't the point. Animation effort goes where it's actually safe and valuable: panels, buttons, and the progress bar below.
+
+- [ ] **Step 1: Shared motion tokens**
+
+```typescript
+import type { Variants, Transition } from "framer-motion";
+
+/** One shared rhythm for every animation in the app - durations in the 150-300ms
+ * micro-interaction range, exit faster than enter (~65%) so dismissal feels snappy. */
+export const MOTION_DURATION = {
+  fast: 0.15,
+  base: 0.2,
+} as const;
+
+export const EASE_OUT = [0.16, 1, 0.3, 1] as const;
+export const EASE_IN = [0.7, 0, 0.84, 0] as const;
+
+/** Panels fade + rise slightly on enter, fade out faster on exit. */
+export const panelVariants: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: { opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: EASE_OUT } },
+  exit: { opacity: 0, y: 4, transition: { duration: MOTION_DURATION.fast, ease: EASE_IN } },
+};
+
+export const progressBarTransition: Transition = { duration: 0.5, ease: EASE_OUT };
+```
+
+- [ ] **Step 2: Fix the progress bar to animate via `transform: scaleX` instead of `width`**
+
+The current `components/ui/progress.tsx` animates the literal `width` CSS property via `transition-all duration-500` — this forces a layout recalculation on every update. Rewrite it to animate a GPU-composited `scaleX` transform instead, which never triggers layout:
+
+```typescript
+"use client";
+
+import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
+import { progressBarTransition } from "@/utils/motion";
+
+export function Progress({ value, className }: { value: number; className?: string }) {
+  const clamped = Math.min(100, Math.max(0, value)) / 100;
+  return (
+    <div className={cn("h-2 w-full overflow-hidden rounded-full bg-zinc-800", className)}>
+      <motion.div
+        className="h-full w-full origin-left rounded-full bg-emerald-500"
+        initial={false}
+        animate={{ scaleX: clamped }}
+        transition={progressBarTransition}
+      />
+    </div>
+  );
+}
+```
+(`origin-left` keeps the scale anchored to the left edge, so it visually grows left-to-right exactly like the old width-based version — but composited on the GPU instead of triggering layout.)
+
+- [ ] **Step 3: Press/hover feedback on the shared Button**
+
+The current `buttonVariants` base class is `"...transition-colors..."`, which only transitions color-related properties — adding a press-scale effect needs `transform` included in the transitioned properties, or the scale will snap instead of animate. Change the base class:
+
+```typescript
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium " +
+    "transition-[color,background-color,transform] duration-150 active:scale-[0.97] " +
+    "disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 " +
+    "focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+  {
+    // ...variants/sizes/defaultVariants unchanged...
+  },
+);
+```
+
+- [ ] **Step 4: A shared skeleton for the calculator panels' loading states**
+
+The rollout-planner, capacity-timeline, and send-plan panels all call a server action and briefly show nothing while it resolves. Per the loading-states guideline (skeleton over blocking spinner for anything that might exceed ~300ms), add:
+
+```typescript
+import { cn } from "@/lib/utils";
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-md bg-zinc-800", className)} />;
+}
+```
+
+- [ ] **Step 5: Wire panel enter/exit motion + loading skeletons into the three calculator panels**
+
+In `components/campaign/send-plan-panel.tsx`, wrap the existing returned JSX in `AnimatePresence`/`motion.div` and add a loading skeleton while `plan` hasn't resolved yet:
+
+```typescript
+import { motion, AnimatePresence } from "framer-motion";
+import { panelVariants } from "@/utils/motion";
+import { Skeleton } from "@/components/ui/skeleton";
+// ...
+if (accounts.length === 0) return null;
+
+return (
+  <AnimatePresence mode="wait">
+    <motion.div
+      key={plan ? "loaded" : "loading"}
+      variants={panelVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      className="flex flex-col gap-2 rounded-lg border border-zinc-800 p-4"
+    >
+      <p className="text-sm font-medium text-zinc-100">Send Plan</p>
+      {/* ...existing checkbox list and plan/warnings rendering unchanged... */}
+      {!plan && recipientCount > 0 && (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
+      )}
+    </motion.div>
+  </AnimatePresence>
+);
+```
+
+Apply the identical pattern (import, `AnimatePresence`/`motion.div` wrapper with `panelVariants`, a `Skeleton` shown while its own `plan`/`projection` state is `null` and a calculation is in flight) to `rollout-planner-panel.tsx` and `capacity-timeline-panel.tsx` — same three-line wrapper, different inner content, since all three share the exact same "empty → calculating → result" shape.
+
+- [ ] **Step 6: Typecheck, and manually verify in the browser**
+
+Run: `npx tsc --noEmit`
+
+Then actually load the app and: (a) toggle a `SendPlanPanel` checkbox and confirm the panel doesn't jump/flicker, (b) watch a campaign's progress bar advance and confirm it's smooth, (c) enable "reduce motion" in your OS accessibility settings and confirm framer-motion respects it (it does automatically via its built-in `useReducedMotion` detection — no extra code needed, but verify rather than assume).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A
+git commit -m "Add motion tokens, transform-based progress bar, and skeleton loading states"
+```
+
+---
+
 ## Open questions to resolve with the user before/while executing
 
 1. **Multi-day auto-resume** (Task 9), **inbox polling** (Task 14), and **the sending-window pause** (Task 18) all rely on *something* pinging the app periodically to resume a paused campaign. A `send_later`/Routine-style recurring job (if this environment supports it), or accept that revisiting the app is what triggers them — these three could reasonably share a single "periodic maintenance" ping. Confirm which approach before building.
@@ -3077,3 +3225,4 @@ git commit -m "Add configurable business-hours sending window"
 6. **Task 16 (open/click tracking)** — confirm you still want pixel-based open tracking given its acknowledged unreliability, or whether click tracking alone is enough.
 7. **`APP_BASE_URL`** (Tasks 16 and 17) needs to be a real, publicly reachable URL for tracking links, unsubscribe links, and the `List-Unsubscribe` header to work at all — ties back to the earlier hosting/tunnel decision.
 8. **Default sending window** (Task 18 defaults to 9am–5pm UTC, weekdays only) — confirm your preferred hours/timezone, since UTC is unlikely to match your actual audience.
+9. **Task 19's design guidance came from the UI/UX skill's written reference only** — the actual searchable design-system database (color palettes, font pairings, generated component recommendations) isn't installed in this environment, so the durations/easing/contrast numbers used are real sourced values, but a generated palette/typography system wasn't available to pull from. If you want that fuller design-system generation, it'd need that tool available in whatever environment actually executes this.
