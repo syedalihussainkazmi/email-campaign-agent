@@ -3087,7 +3087,7 @@ git commit -m "Add configurable business-hours sending window"
 
 **Scope decision, stated up front**: the recipient chip list (`recipient-dump.tsx`) stays un-animated per-item. It's virtualized via `@tanstack/react-virtual`, which recycles DOM nodes at fixed computed positions — layering enter/exit/stagger animation on top of that risks visual glitches (recycled nodes replaying animations, momentarily wrong positions) for a dense data list where that kind of delight isn't the point. Animation effort goes where it's actually safe and valuable: panels, buttons, and the progress bar below.
 
-- [ ] **Step 1: Shared motion tokens**
+- [x] **Step 1: Shared motion tokens**
 
 ```typescript
 import type { Variants, Transition } from "framer-motion";
@@ -3112,7 +3112,7 @@ export const panelVariants: Variants = {
 export const progressBarTransition: Transition = { duration: 0.5, ease: EASE_OUT };
 ```
 
-- [ ] **Step 2: Fix the progress bar to animate via `transform: scaleX` instead of `width`**
+- [x] **Step 2: Fix the progress bar to animate via `transform: scaleX` instead of `width`**
 
 The current `components/ui/progress.tsx` animates the literal `width` CSS property via `transition-all duration-500` — this forces a layout recalculation on every update. Rewrite it to animate a GPU-composited `scaleX` transform instead, which never triggers layout:
 
@@ -3139,7 +3139,7 @@ export function Progress({ value, className }: { value: number; className?: stri
 ```
 (`origin-left` keeps the scale anchored to the left edge, so it visually grows left-to-right exactly like the old width-based version — but composited on the GPU instead of triggering layout.)
 
-- [ ] **Step 3: Press/hover feedback on the shared Button**
+- [x] **Step 3: Press/hover feedback on the shared Button**
 
 The current `buttonVariants` base class is `"...transition-colors..."`, which only transitions color-related properties — adding a press-scale effect needs `transform` included in the transitioned properties, or the scale will snap instead of animate. Change the base class:
 
@@ -3155,7 +3155,7 @@ const buttonVariants = cva(
 );
 ```
 
-- [ ] **Step 4: A shared skeleton for the calculator panels' loading states**
+- [x] **Step 4: A shared skeleton for the calculator panels' loading states**
 
 The rollout-planner, capacity-timeline, and send-plan panels all call a server action and briefly show nothing while it resolves. Per the loading-states guideline (skeleton over blocking spinner for anything that might exceed ~300ms), add:
 
@@ -3167,7 +3167,7 @@ export function Skeleton({ className }: { className?: string }) {
 }
 ```
 
-- [ ] **Step 5: Wire panel enter/exit motion + loading skeletons into the three calculator panels**
+- [x] **Step 5: Wire panel enter/exit motion + loading skeletons into the three calculator panels**
 
 In `components/campaign/send-plan-panel.tsx`, wrap the existing returned JSX in `AnimatePresence`/`motion.div` and add a loading skeleton while `plan` hasn't resolved yet:
 
@@ -3203,13 +3203,13 @@ return (
 
 Apply the identical pattern (import, `AnimatePresence`/`motion.div` wrapper with `panelVariants`, a `Skeleton` shown while its own `plan`/`projection` state is `null` and a calculation is in flight) to `rollout-planner-panel.tsx` and `capacity-timeline-panel.tsx` — same three-line wrapper, different inner content, since all three share the exact same "empty → calculating → result" shape.
 
-- [ ] **Step 6: Typecheck, and manually verify in the browser**
+- [x] **Step 6: Typecheck, and manually verify in the browser**
 
 Run: `npx tsc --noEmit`
 
 Then actually load the app and: (a) toggle a `SendPlanPanel` checkbox and confirm the panel doesn't jump/flicker, (b) watch a campaign's progress bar advance and confirm it's smooth, (c) enable "reduce motion" in your OS accessibility settings and confirm framer-motion respects it (it does automatically via its built-in `useReducedMotion` detection — no extra code needed, but verify rather than assume).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
