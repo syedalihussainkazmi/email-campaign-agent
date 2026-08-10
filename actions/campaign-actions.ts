@@ -7,7 +7,12 @@ import { logAudit } from "@/services/audit-service";
 import { startCampaignRunner } from "@/server/campaign-runner";
 import { isRateLimited } from "@/server/rate-limiter";
 import { listSmtpAccounts } from "@/services/smtp-service";
-import { buildSendPlan, toPlannerAccount, projectAccountCapacityTimeline } from "@/services/send-planner";
+import {
+  buildSendPlan,
+  buildUncappedAllocations,
+  toPlannerAccount,
+  projectAccountCapacityTimeline,
+} from "@/services/send-planner";
 import { planNewRollout } from "@/services/rollout-planner";
 
 const createCampaignSchema = z.object({
@@ -41,7 +46,13 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
   // never silently fall back to "all active accounts" at send time.
   const allAccounts = await listSmtpAccounts(session.user.id);
   const selectedAccounts = allAccounts.filter((a) => parsed.accountIds.includes(a.id)).map(toPlannerAccount);
-  const plan = buildSendPlan(parsed.recipients.length, selectedAccounts, { hasPersonalization });
+
+  // useFixedPace is an explicit opt-out of the daily ramp-cap "brain" — every
+  // recipient goes out today, round-robin across selected accounts, at a
+  // flat 5s gap, regardless of account age/daily caps.
+  const accountAllocations = parsed.useFixedPace
+    ? buildUncappedAllocations(parsed.recipients.length, selectedAccounts)
+    : buildSendPlan(parsed.recipients.length, selectedAccounts, { hasPersonalization }).allocations;
 
   const { campaign, skippedUnsubscribed } = await createCampaign({
     userId: session.user.id,
@@ -49,7 +60,7 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
     bodyHtml: parsed.bodyHtml,
     bodyText: parsed.bodyText,
     recipients: parsed.recipients,
-    accountAllocations: plan.allocations,
+    accountAllocations,
     fixedDelaySeconds: parsed.useFixedPace ? 5 : undefined,
   });
 

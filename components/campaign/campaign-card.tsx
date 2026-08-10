@@ -81,7 +81,8 @@ export function CampaignCard() {
             checked={useFixedPace}
             onChange={(e) => setUseFixedPace(e.target.checked)}
           />
-          Send at a fixed 5-second pace instead of randomized 5-10s (daily send caps still apply)
+          Send everyone now at a fixed 5-second pace, ignoring daily send caps (higher risk of spam
+          flagging — use with caution)
         </label>
 
         {error && <p className="text-sm text-red-400">{error}</p>}

@@ -129,6 +129,30 @@ export function buildSendPlan(
   return { totalRecipients: recipientCount, estimatedDays, allocations, warnings };
 }
 
+/**
+ * Ignores daily send caps entirely and allocates every recipient to today,
+ * spread round-robin (evenly, remainder to the first accounts) across every
+ * active selected account. This is the explicit opt-out of the ramp-schedule
+ * "brain" for a user who has decided the risk tradeoff themselves — never
+ * the default path.
+ */
+export function buildUncappedAllocations(
+  recipientCount: number,
+  accounts: PlannerAccount[],
+): SendPlan["allocations"] {
+  const active = accounts.filter((a) => a.isActive);
+  if (active.length === 0 || recipientCount === 0) return [];
+
+  const base = Math.floor(recipientCount / active.length);
+  const remainder = recipientCount % active.length;
+
+  return active.map((account, i) => ({
+    accountId: account.id,
+    label: account.label,
+    count: base + (i < remainder ? 1 : 0),
+  }));
+}
+
 export interface CapacityProjection {
   dailyCapacityByDay: number[];
   daysToClear: number | null;

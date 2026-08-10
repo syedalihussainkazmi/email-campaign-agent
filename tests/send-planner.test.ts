@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildSendPlan, capForAge, ageInDays, projectAccountCapacityTimeline } from "@/services/send-planner";
+import {
+  buildSendPlan,
+  buildUncappedAllocations,
+  capForAge,
+  ageInDays,
+  projectAccountCapacityTimeline,
+} from "@/services/send-planner";
 
 const account = (overrides: Partial<Parameters<typeof buildSendPlan>[1][number]> = {}) => ({
   id: "acc1",
@@ -118,5 +124,39 @@ describe("projectAccountCapacityTimeline", () => {
     ];
     const projection = projectAccountCapacityTimeline(accounts, 50, 5);
     expect(projection.dailyCapacityByDay[0]).toBe(100); // only B counted
+  });
+});
+
+describe("buildUncappedAllocations", () => {
+  it("ignores daily caps entirely, allocating the full recipient count today", () => {
+    // A brand-new account (cap 10/day) still gets its full share of 500 recipients.
+    const accounts = [account({ id: "acc1", ageDays: 0 })];
+    const allocations = buildUncappedAllocations(500, accounts);
+    expect(allocations).toEqual([{ accountId: "acc1", label: "Main", count: 500 }]);
+  });
+
+  it("splits evenly across accounts, remainder to the first ones", () => {
+    const accounts = [
+      account({ id: "a", label: "A" }),
+      account({ id: "b", label: "B" }),
+      account({ id: "c", label: "C" }),
+    ];
+    const allocations = buildUncappedAllocations(10, accounts);
+    expect(allocations).toEqual([
+      { accountId: "a", label: "A", count: 4 },
+      { accountId: "b", label: "B", count: 3 },
+      { accountId: "c", label: "C", count: 3 },
+    ]);
+  });
+
+  it("excludes inactive accounts", () => {
+    const accounts = [account({ id: "a", isActive: false }), account({ id: "b" })];
+    const allocations = buildUncappedAllocations(10, accounts);
+    expect(allocations).toEqual([{ accountId: "b", label: "Main", count: 10 }]);
+  });
+
+  it("returns no allocations when there are no active accounts or no recipients", () => {
+    expect(buildUncappedAllocations(10, [])).toEqual([]);
+    expect(buildUncappedAllocations(0, [account()])).toEqual([]);
   });
 });
