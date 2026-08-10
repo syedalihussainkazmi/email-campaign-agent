@@ -50,6 +50,9 @@ This plan covers four subsystems that depend on each other in sequence (auth cle
 | `app/api/track/open/[trackingId]/route.ts` | New (optional). 1x1 pixel endpoint, records `openedAt`. |
 | `app/api/track/click/[trackingId]/route.ts` | New (optional). Redirect-through endpoint, records `firstClickedAt`/`clickCount`. |
 | `utils/link-tracking.ts` | New (optional). Rewrites `<a href>`s in an HTML body to route through the click-tracking endpoint. |
+| `services/unsubscribe-service.ts` | New. Pure `buildUnsubscribeHeaders`, plus DB-backed lookup/mark-unsubscribed functions. |
+| `app/api/unsubscribe/[token]/route.ts` | New. GET (human click) and POST (RFC 8058 one-click) both mark the recipient unsubscribed. |
+| `services/sending-window-service.ts` | New. Pure `isWithinSendingWindow`, plus a per-user Setting for the configured window. |
 | `app/page.tsx` | Gmail button + dev-login button removed; only the webmail form remains (no longer collapsible — it's the only option). |
 
 ---
@@ -2580,12 +2583,497 @@ git commit -m "Add optional open/click tracking (click tracking is the reliable 
 
 ---
 
+### Task 17: One-click unsubscribe + `List-Unsubscribe` header
+
+**Files:**
+- Modify: `prisma/schema.prisma` (`unsubscribeToken`, `unsubscribedAt` on `Recipient`)
+- Create: `services/unsubscribe-service.ts`
+- Test: `tests/unsubscribe-service.test.ts`
+- Create: `app/api/unsubscribe/[token]/route.ts`
+- Modify: `services/email-sender.ts` (add `headers` to `OutgoingEmail`)
+- Modify: `services/smtp-sender.ts` (pass `headers` through to nodemailer)
+- Modify: `services/campaign-service.ts` (`createCampaign` filters out already-unsubscribed emails, reports how many were skipped)
+- Modify: `server/campaign-runner.ts` (attaches the header + visible link to every send; defensively skips if unsubscribed after the campaign was created)
+- Modify: `actions/campaign-actions.ts` (surface `skippedUnsubscribed` count to the caller)
+
+- [ ] **Step 1: Add the fields**
+
+```prisma
+model Recipient {
+  // ...existing fields...
+  unsubscribeToken String    @unique @default(cuid())
+  unsubscribedAt   DateTime?
+}
+```
+
+Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_unsubscribe`
+
+- [ ] **Step 2: Write the failing test for the pure header-builder**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { buildUnsubscribeHeaders } from "@/services/unsubscribe-service";
+
+describe("buildUnsubscribeHeaders", () => {
+  it("includes both the https link and List-Unsubscribe-Post for one-click support", () => {
+    const headers = buildUnsubscribeHeaders("https://mailpilot.example/api/unsubscribe/abc123");
+    expect(headers["List-Unsubscribe"]).toBe("<https://mailpilot.example/api/unsubscribe/abc123>");
+    expect(headers["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+  });
+});
+```
+
+- [ ] **Step 3: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/unsubscribe-service.test.ts`
+Expected: FAIL — `Cannot find module '@/services/unsubscribe-service'`
+
+- [ ] **Step 4: Implement `services/unsubscribe-service.ts`**
+
+```typescript
+import { prisma } from "@/database/prisma";
+
+/**
+ * Builds the RFC 2369 / RFC 8058 headers that let Gmail/Yahoo/Outlook show
+ * their own built-in one-click "Unsubscribe" button next to the sender
+ * name, which is effectively required at any real volume under their 2024
+ * bulk-sender rules.
+ */
+export function buildUnsubscribeHeaders(unsubscribeUrl: string): Record<string, string> {
+  return {
+    "List-Unsubscribe": `<${unsubscribeUrl}>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
+}
+
+export async function markUnsubscribed(token: string): Promise<void> {
+  await prisma.recipient.updateMany({
+    where: { unsubscribeToken: token, unsubscribedAt: null },
+    data: { unsubscribedAt: new Date() },
+  });
+}
+
+/** Emails (lowercased) among `emails` that are already unsubscribed for this user. */
+export async function findUnsubscribedEmails(userId: string, emails: string[]): Promise<Set<string>> {
+  const rows = await prisma.recipient.findMany({
+    where: { userId, email: { in: emails }, unsubscribedAt: { not: null } },
+    select: { email: true },
+  });
+  return new Set(rows.map((r) => r.email));
+}
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/unsubscribe-service.test.ts`
+Expected: PASS — 1 test.
+
+- [ ] **Step 6: Add the unsubscribe route**
+
+```typescript
+import { markUnsubscribed } from "@/services/unsubscribe-service";
+
+async function handle(token: string) {
+  await markUnsubscribed(token);
+  return new Response(
+    "<html><body style=\"font-family:sans-serif;padding:2rem\">" +
+      "You've been unsubscribed and won't receive further emails from this sender.</body></html>",
+    { headers: { "Content-Type": "text/html" } },
+  );
+}
+
+// A human clicking the visible link in the email body.
+export async function GET(_req: Request, { params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  return handle(token);
+}
+
+// RFC 8058 one-click: mail clients POST here directly with no confirmation
+// page - the spec requires this to succeed silently, no further interaction.
+export async function POST(_req: Request, { params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  return handle(token);
+}
+```
+
+- [ ] **Step 7: Add `headers` to the sending pipeline**
+
+In `services/email-sender.ts`:
+```typescript
+export interface OutgoingEmail {
+  to: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText?: string;
+  headers?: Record<string, string>;
+}
+```
+
+In `services/smtp-sender.ts`, pass it through:
+```typescript
+await transporter.sendMail({
+  from: this.config.fromEmail,
+  to: message.to,
+  subject: message.subject,
+  html: message.bodyHtml,
+  text: message.bodyText,
+  headers: message.headers,
+});
+```
+
+- [ ] **Step 8: Filter unsubscribed recipients out of `createCampaign`**
+
+This replaces `createCampaign` from Task 7 Step 3 in full — only the first two lines (deduping, then filtering out unsubscribed emails) and the final return statement are new; the transaction body itself is unchanged from Task 7:
+
+```typescript
+import { findUnsubscribedEmails } from "@/services/unsubscribe-service";
+
+export async function createCampaign(input: CreateCampaignInput) {
+  const deduped = dedupeRecipients(input.recipients);
+  const unsubscribed = await findUnsubscribedEmails(
+    input.userId,
+    deduped.map((r) => r.email),
+  );
+  const recipients = deduped.filter((r) => !unsubscribed.has(r.email));
+  const skippedUnsubscribed = deduped.filter((r) => unsubscribed.has(r.email)).map((r) => r.email);
+
+  const campaign = await prisma.$transaction(async (tx) => {
+    const campaign = await tx.campaign.create({
+      data: {
+        userId: input.userId,
+        subject: input.subject,
+        bodyHtml: input.bodyHtml,
+        bodyText: input.bodyText,
+        totalCount: recipients.length,
+      },
+    });
+
+    const accountQueue: string[] = [];
+    for (const alloc of input.accountAllocations) {
+      for (let i = 0; i < alloc.count; i++) accountQueue.push(alloc.accountId);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < recipients.length; i++) {
+      const { email, name, ownerName } = recipients[i];
+      const recipient = await tx.recipient.upsert({
+        where: { userId_email: { userId: input.userId, email } },
+        update: { ...(name ? { name } : {}), ...(ownerName ? { ownerName } : {}) },
+        create: { userId: input.userId, email, name, ownerName },
+      });
+
+      const isWithinToday = i < accountQueue.length;
+      const scheduledFor = isWithinToday
+        ? today
+        : new Date(today.getTime() + Math.floor(i / Math.max(accountQueue.length, 1)) * 86400000);
+
+      await tx.campaignRecipient.create({
+        data: {
+          campaignId: campaign.id,
+          recipientId: recipient.id,
+          name,
+          ownerName,
+          smtpAccountId: isWithinToday ? accountQueue[i] : accountQueue[i % accountQueue.length],
+          scheduledFor,
+        },
+      });
+    }
+
+    return campaign;
+  });
+
+  return { campaign, skippedUnsubscribed };
+}
+```
+(This changes `createCampaign`'s return shape from `campaign` to `{ campaign, skippedUnsubscribed }` — update `createAndStartCampaignAction` in Step 10 below accordingly, since it's the only caller.)
+
+- [ ] **Step 9: Attach the header and visible link at send time in `server/campaign-runner.ts`**
+
+Before building the `sender.send(...)` call, and after fetching `recipient` (already done in Task 9's rewrite):
+```typescript
+if (recipient.unsubscribedAt) {
+  await prisma.campaignRecipient.update({
+    where: { id: next.id },
+    data: { status: "failed", error: "Recipient unsubscribed" },
+  });
+  continue;
+}
+
+const unsubscribeUrl = `${process.env.APP_BASE_URL}/api/unsubscribe/${recipient.unsubscribeToken}`;
+const unsubscribeFooter =
+  `<br/><br/><p style="font-size:11px;color:#888">Don't want these emails? ` +
+  `<a href="${unsubscribeUrl}">Unsubscribe</a></p>`;
+
+const result = await sender.send(campaign.userId, {
+  to: recipient.email,
+  subject: renderTemplate(campaign.subject, variables),
+  bodyHtml: renderTemplate(campaign.bodyHtml, variables) + signatureHtml + unsubscribeFooter,
+  bodyText: campaign.bodyText
+    ? renderTemplate(campaign.bodyText, variables) + signatureText + `\n\nUnsubscribe: ${unsubscribeUrl}`
+    : undefined,
+  headers: buildUnsubscribeHeaders(unsubscribeUrl),
+});
+```
+
+- [ ] **Step 10: Update `createAndStartCampaignAction` for the new return shape**
+
+```typescript
+const { campaign, skippedUnsubscribed } = await createCampaign({
+  userId: session.user.id,
+  subject: parsed.subject,
+  bodyHtml: parsed.bodyHtml,
+  bodyText: parsed.bodyText,
+  recipients: parsed.recipients,
+  accountAllocations: plan.allocations,
+});
+
+await logAudit(session.user.id, "campaign.create", { type: "campaign", id: campaign.id });
+void startCampaignRunner(campaign.id);
+
+return { campaignId: campaign.id, skippedUnsubscribed };
+```
+
+- [ ] **Step 11: Typecheck, test, commit**
+
+Run: `npx tsc --noEmit && npx vitest run`
+```bash
+git add -A
+git commit -m "Add one-click unsubscribe with List-Unsubscribe/List-Unsubscribe-Post headers"
+```
+
+---
+
+### Task 18: Business-hours-aware sending
+
+**Files:**
+- Create: `services/sending-window-service.ts`
+- Test: `tests/sending-window-service.test.ts`
+- Modify: `prisma/schema.prisma` (no new model — reuses the existing `Setting` key-value table, same pattern as the email signature)
+- Create: `components/campaign/sending-window-form.tsx`
+- Modify: `actions/settings-actions.ts` (save/load the window)
+- Modify: `app/settings/page.tsx`
+- Modify: `server/campaign-runner.ts` (check the window before each send)
+
+**Scope note**: this can't know an individual recipient's actual location/timezone from just their email address — there's no reliable way to geolocate an arbitrary address. What it *can* do is let you set a single sending window (e.g. "9am–5pm, Mon–Fri, Australia/Brisbane") for your intended audience, and the runner simply won't send outside it. That's the honest, buildable version of "business-hours-aware."
+
+- [ ] **Step 1: Write the failing tests**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { isWithinSendingWindow } from "@/services/sending-window-service";
+
+const window = { startHour: 9, endHour: 17, timezone: "UTC", sendOnWeekends: false };
+
+describe("isWithinSendingWindow", () => {
+  it("allows sending during business hours on a weekday", () => {
+    // 2026-08-04 is a Tuesday
+    expect(isWithinSendingWindow(new Date("2026-08-04T12:00:00Z"), window)).toBe(true);
+  });
+
+  it("blocks sending outside business hours", () => {
+    expect(isWithinSendingWindow(new Date("2026-08-04T03:00:00Z"), window)).toBe(false);
+  });
+
+  it("blocks weekends when sendOnWeekends is false", () => {
+    // 2026-08-08 is a Saturday
+    expect(isWithinSendingWindow(new Date("2026-08-08T12:00:00Z"), window)).toBe(false);
+  });
+
+  it("allows weekends when sendOnWeekends is true", () => {
+    expect(isWithinSendingWindow(new Date("2026-08-08T12:00:00Z"), { ...window, sendOnWeekends: true })).toBe(
+      true,
+    );
+  });
+
+  it("respects a non-UTC timezone", () => {
+    // 2026-08-04T20:00:00Z = 2026-08-05 06:00 AEST - before the 9am start in that zone
+    const aestWindow = { ...window, timezone: "Australia/Brisbane" };
+    expect(isWithinSendingWindow(new Date("2026-08-04T20:00:00Z"), aestWindow)).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/sending-window-service.test.ts`
+Expected: FAIL — `Cannot find module '@/services/sending-window-service'`
+
+- [ ] **Step 3: Implement `services/sending-window-service.ts`**
+
+```typescript
+import { prisma } from "@/database/prisma";
+
+export interface SendingWindow {
+  startHour: number; // 0-23, inclusive
+  endHour: number; // 0-23, exclusive
+  timezone: string; // IANA timezone, e.g. "Australia/Brisbane"
+  sendOnWeekends: boolean;
+}
+
+const DEFAULT_WINDOW: SendingWindow = {
+  startHour: 9,
+  endHour: 17,
+  timezone: "UTC",
+  sendOnWeekends: false,
+};
+
+const SENDING_WINDOW_KEY = "sending_window";
+
+/** Pure — no I/O. Checks `now` against the window using timezone-aware hour/weekday extraction. */
+export function isWithinSendingWindow(now: Date, window: SendingWindow): boolean {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: window.timezone,
+    hour: "numeric",
+    hour12: false,
+    weekday: "short",
+  });
+  const parts = formatter.formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0") % 24;
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const isWeekend = weekday === "Sat" || weekday === "Sun";
+
+  if (isWeekend && !window.sendOnWeekends) return false;
+  return hour >= window.startHour && hour < window.endHour;
+}
+
+export async function getSendingWindow(userId: string): Promise<SendingWindow> {
+  const setting = await prisma.setting.findUnique({
+    where: { userId_key: { userId, key: SENDING_WINDOW_KEY } },
+  });
+  return setting?.value ? JSON.parse(setting.value) : DEFAULT_WINDOW;
+}
+
+export async function setSendingWindow(userId: string, window: SendingWindow): Promise<void> {
+  const value = JSON.stringify(window);
+  await prisma.setting.upsert({
+    where: { userId_key: { userId, key: SENDING_WINDOW_KEY } },
+    update: { value },
+    create: { userId, key: SENDING_WINDOW_KEY, value },
+  });
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/sending-window-service.test.ts`
+Expected: PASS — 5 tests.
+
+- [ ] **Step 5: Check the window in the send loop**
+
+In `server/campaign-runner.ts`, near the top of the `while (true)` loop, after the existing pause/cancel checks:
+```typescript
+const window = await getSendingWindow(campaign.userId);
+if (!isWithinSendingWindow(new Date(), window)) {
+  await prisma.campaign.update({ where: { id: campaignId }, data: { status: "paused" } });
+  return; // picked back up by the same daily/periodic trigger as Task 9's multi-day resume
+}
+```
+(Fetching the window on every loop iteration keeps it responsive to mid-campaign edits; it's a single indexed `Setting` row lookup, not meaningfully expensive at this send pace of one recipient per 5-10 seconds.)
+
+- [ ] **Step 6: Build the Settings form**
+
+```typescript
+"use client";
+
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { saveSendingWindowAction } from "@/actions/settings-actions";
+import type { SendingWindow } from "@/services/sending-window-service";
+
+export function SendingWindowForm({ initialValue }: { initialValue: SendingWindow }) {
+  const [startHour, setStartHour] = useState(String(initialValue.startHour));
+  const [endHour, setEndHour] = useState(String(initialValue.endHour));
+  const [timezone, setTimezone] = useState(initialValue.timezone);
+  const [sendOnWeekends, setSendOnWeekends] = useState(initialValue.sendOnWeekends);
+  const [saved, setSaved] = useState(false);
+
+  async function handleSave() {
+    await saveSendingWindowAction({
+      startHour: Number(startHour),
+      endHour: Number(endHour),
+      timezone,
+      sendOnWeekends,
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-zinc-500">
+        Campaigns pause automatically outside this window and resume once it reopens.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Input placeholder="Start hour (0-23)" value={startHour} onChange={(e) => setStartHour(e.target.value)} />
+        <Input placeholder="End hour (0-23)" value={endHour} onChange={(e) => setEndHour(e.target.value)} />
+        <Input
+          placeholder="Timezone (e.g. Australia/Brisbane)"
+          value={timezone}
+          onChange={(e) => setTimezone(e.target.value)}
+          className="col-span-2"
+        />
+      </div>
+      <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={sendOnWeekends}
+          onChange={(e) => setSendOnWeekends(e.target.checked)}
+        />
+        Also send on weekends
+      </label>
+      <Button size="sm" onClick={handleSave}>
+        Save
+      </Button>
+      {saved && <span className="text-xs text-emerald-400">Saved</span>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 7: Wire up the action and Settings page**
+
+```typescript
+// in actions/settings-actions.ts
+import { setSendingWindow, type SendingWindow } from "@/services/sending-window-service";
+
+const sendingWindowSchema = z.object({
+  startHour: z.number().int().min(0).max(23),
+  endHour: z.number().int().min(0).max(23),
+  timezone: z.string().min(1),
+  sendOnWeekends: z.boolean(),
+});
+
+export async function saveSendingWindowAction(input: z.infer<typeof sendingWindowSchema>) {
+  const session = await requireSession();
+  const parsed = sendingWindowSchema.parse(input) satisfies SendingWindow;
+  await setSendingWindow(session.user.id, parsed);
+  revalidatePath("/settings");
+  return { ok: true };
+}
+```
+
+In `app/settings/page.tsx`, fetch `getSendingWindow(session.user.id)` alongside the other settings and render a new card with `<SendingWindowForm initialValue={sendingWindow} />`.
+
+- [ ] **Step 8: Typecheck, test, commit**
+
+Run: `npx tsc --noEmit && npx vitest run`
+```bash
+git add -A
+git commit -m "Add configurable business-hours sending window"
+```
+
+---
+
 ## Open questions to resolve with the user before/while executing
 
-1. **Multi-day auto-resume** (Task 9) and **inbox polling** (Task 14) both need *something* to ping their respective endpoints periodically — a `send_later`/Routine-style recurring job (if this environment supports it), or accept that revisiting the app is what triggers them. These two could reasonably share a single "daily maintenance" cron ping. Confirm which approach before building.
+1. **Multi-day auto-resume** (Task 9), **inbox polling** (Task 14), and **the sending-window pause** (Task 18) all rely on *something* pinging the app periodically to resume a paused campaign. A `send_later`/Routine-style recurring job (if this environment supports it), or accept that revisiting the app is what triggers them — these three could reasonably share a single "periodic maintenance" ping. Confirm which approach before building.
 2. **The ramp schedule** (day 0→10/day, day 4→25, day 15→50, day 30→75, day 60→100) is a default heuristic from common cold-outreach warm-up guidance, not a guaranteed-safe curve from Google — confirm it feels right, or provide preferred numbers/breakpoints.
 3. **Task 12's WHOIS dependency** adds a new package and outbound non-HTTPS network calls to third-party registrars — explicitly confirm you want this before it's built, since it's the one piece of this plan that reaches outside your own infrastructure.
 4. **Mailboxes-per-domain guideline** (default 4, used by Task 11's domain count) is a rough rule of thumb, not a hard rule from any provider — adjust if you have a different number in mind.
-5. **SPF/DKIM/DMARC live DNS check** was flagged as a strong follow-up candidate (more reliable than WHOIS domain age, since DNS TXT records are deterministic and unambiguous) but isn't in this plan's tasks yet — worth adding as Task 17 once the core flow works, if you want it.
+5. **SPF/DKIM/DMARC live DNS check** was flagged as a strong follow-up candidate (more reliable than WHOIS domain age, since DNS TXT records are deterministic and unambiguous) but isn't in this plan's tasks yet — worth adding as a future task once the core flow works, if you want it.
 6. **Task 16 (open/click tracking)** — confirm you still want pixel-based open tracking given its acknowledged unreliability, or whether click tracking alone is enough.
-7. **`APP_BASE_URL`** (Task 16) needs to be a real, publicly reachable URL for tracking links/pixels to work at all — ties back to the earlier hosting/tunnel decision.
+7. **`APP_BASE_URL`** (Tasks 16 and 17) needs to be a real, publicly reachable URL for tracking links, unsubscribe links, and the `List-Unsubscribe` header to work at all — ties back to the earlier hosting/tunnel decision.
+8. **Default sending window** (Task 18 defaults to 9am–5pm UTC, weekdays only) — confirm your preferred hours/timezone, since UTC is unlikely to match your actual audience.
