@@ -27,6 +27,30 @@ enum CampaignRecipientStatus {
   failed
 }
 
+model SmtpAccount {
+  id                  String   @id @default(cuid())
+  userId              String
+  label               String
+  host                String
+  port                Int
+  secure              Boolean
+  username            String
+  encryptedPassword   String
+  fromEmail           String
+  // The date warmup/age is calculated from — defaults to "added today" but
+  // editable, since an account may already be an established real mailbox.
+  mailboxAgeStartDate DateTime @default(now())
+  dailyCapOverride    Int?
+  sentToday           Int      @default(0)
+  sentTodayDate       DateTime @default(now())
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
@@ -43,6 +67,7 @@ model User {
   templates     EmailTemplate[]
   auditLogs     AuditLog[]
   settings      Setting[]
+  smtpAccounts  SmtpAccount[]
 }
 
 model Session {
