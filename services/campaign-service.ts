@@ -7,6 +7,7 @@ export interface CreateCampaignInput {
   bodyHtml: string;
   bodyText?: string;
   recipients: ParsedRecipient[];
+  accountAllocations: { accountId: string; count: number }[]; // today's batch, in order
 }
 
 /**
@@ -17,6 +18,13 @@ export interface CreateCampaignInput {
  * address can never silently leak into a later one that didn't specify it.
  * The shared Recipient pool is still updated opportunistically (only when a
  * non-empty value is given) purely as a convenience/dedup record.
+ *
+ * Each recipient is also assigned a specific SmtpAccount and send day:
+ * today's allocation (from the resolved send plan) is flattened into a
+ * queue and handed out in order; anything beyond today's capacity is
+ * scheduled for a later day against the same account rotation, since the
+ * runner re-derives each account's real daily cap every morning via
+ * sentToday's rollover.
  */
 export async function createCampaign(input: CreateCampaignInput) {
   const recipients = dedupeRecipients(input.recipients);
@@ -32,15 +40,36 @@ export async function createCampaign(input: CreateCampaignInput) {
       },
     });
 
-    for (const { email, name, ownerName } of recipients) {
+    const accountQueue: string[] = [];
+    for (const alloc of input.accountAllocations) {
+      for (let i = 0; i < alloc.count; i++) accountQueue.push(alloc.accountId);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < recipients.length; i++) {
+      const { email, name, ownerName } = recipients[i];
       const recipient = await tx.recipient.upsert({
         where: { userId_email: { userId: input.userId, email } },
         update: { ...(name ? { name } : {}), ...(ownerName ? { ownerName } : {}) },
         create: { userId: input.userId, email, name, ownerName },
       });
 
+      const isWithinToday = i < accountQueue.length;
+      const scheduledFor = isWithinToday
+        ? today
+        : new Date(today.getTime() + Math.floor(i / Math.max(accountQueue.length, 1)) * 86400000);
+
       await tx.campaignRecipient.create({
-        data: { campaignId: campaign.id, recipientId: recipient.id, name, ownerName },
+        data: {
+          campaignId: campaign.id,
+          recipientId: recipient.id,
+          name,
+          ownerName,
+          smtpAccountId: isWithinToday ? accountQueue[i] : accountQueue[i % accountQueue.length],
+          scheduledFor,
+        },
       });
     }
 

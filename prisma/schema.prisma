@@ -46,7 +46,8 @@ model SmtpAccount {
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipients CampaignRecipient[]
 
   @@index([userId])
 }
@@ -126,17 +127,20 @@ model Recipient {
 }
 
 model CampaignRecipient {
-  id          String                   @id @default(cuid())
-  campaignId  String
-  recipientId String
-  name        String                   @default("")
-  ownerName   String                   @default("")
-  status      CampaignRecipientStatus  @default(pending)
-  sentAt      DateTime?
-  error       String?
+  id            String                  @id @default(cuid())
+  campaignId    String
+  recipientId   String
+  smtpAccountId String?
+  scheduledFor  DateTime                @default(now())
+  name          String                  @default("")
+  ownerName     String                  @default("")
+  status        CampaignRecipientStatus @default(pending)
+  sentAt        DateTime?
+  error         String?
 
-  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  recipient Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  campaign    Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient   Recipient    @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  smtpAccount SmtpAccount? @relation(fields: [smtpAccountId], references: [id])
 
   @@unique([campaignId, recipientId])
   @@index([campaignId, status])

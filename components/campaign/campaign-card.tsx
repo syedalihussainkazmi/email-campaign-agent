@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { EmailEditor } from "@/components/campaign/email-editor";
 import { RecipientDump } from "@/components/campaign/recipient-dump";
 import { SendProgress } from "@/components/campaign/send-progress";
+import { SendPlanPanel } from "@/components/campaign/send-plan-panel";
 import { useRecipientStore } from "@/store/recipient-store";
 import { createAndStartCampaignAction } from "@/actions/campaign-actions";
+
+const PERSONALIZATION_PATTERN = /\{(name|business ?name|owner|owner ?name|first ?name|fname)\}/i;
 
 export function CampaignCard() {
   const [subject, setSubject] = useState("");
@@ -15,8 +18,10 @@ export function CampaignCard() {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedAccountIds, setResolvedAccountIds] = useState<string[]>([]);
   const recipients = useRecipientStore((s) => s.valid);
   const clearAll = useRecipientStore((s) => s.clearAll);
+  const hasPersonalization = PERSONALIZATION_PATTERN.test(subject + body);
 
   async function handleSend() {
     setError(null);
@@ -29,6 +34,10 @@ export function CampaignCard() {
       setError("Add at least one valid recipient.");
       return;
     }
+    if (resolvedAccountIds.length === 0) {
+      setError("Select at least one email account to send from.");
+      return;
+    }
 
     setIsSending(true);
     try {
@@ -37,6 +46,7 @@ export function CampaignCard() {
         bodyHtml: body.replace(/\n/g, "<br/>"),
         bodyText: body,
         recipients,
+        accountIds: resolvedAccountIds,
       });
       setActiveCampaignId(campaignId);
       clearAll();
@@ -56,6 +66,12 @@ export function CampaignCard() {
       <CardContent className="flex flex-col gap-6">
         <EmailEditor subject={subject} onSubjectChange={setSubject} body={body} onBodyChange={setBody} />
         <RecipientDump />
+
+        <SendPlanPanel
+          recipientCount={recipients.length}
+          hasPersonalization={hasPersonalization}
+          onAccountsResolved={setResolvedAccountIds}
+        />
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 

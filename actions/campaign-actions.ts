@@ -6,6 +6,8 @@ import { createCampaign, setCampaignControlFlag } from "@/services/campaign-serv
 import { logAudit } from "@/services/audit-service";
 import { startCampaignRunner } from "@/server/campaign-runner";
 import { isRateLimited } from "@/server/rate-limiter";
+import { listSmtpAccounts } from "@/services/smtp-service";
+import { buildSendPlan, toPlannerAccount } from "@/services/send-planner";
 
 const createCampaignSchema = z.object({
   subject: z.string().min(1).max(300),
@@ -20,6 +22,7 @@ const createCampaignSchema = z.object({
       }),
     )
     .min(1),
+  accountIds: z.array(z.string()).min(1, "Select at least one email account to send from"),
 });
 
 export async function createAndStartCampaignAction(input: z.infer<typeof createCampaignSchema>) {
@@ -29,13 +32,48 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
   }
 
   const parsed = createCampaignSchema.parse(input);
-  const campaign = await createCampaign({ userId: session.user.id, ...parsed });
+  const hasPersonalization = /\{(name|business ?name|owner|owner ?name|first ?name|fname)\}/i.test(
+    parsed.subject + parsed.bodyHtml,
+  );
+  // Re-filter to exactly the accounts the user had checked in the SendPlanPanel —
+  // never silently fall back to "all active accounts" at send time.
+  const allAccounts = await listSmtpAccounts(session.user.id);
+  const selectedAccounts = allAccounts.filter((a) => parsed.accountIds.includes(a.id)).map(toPlannerAccount);
+  const plan = buildSendPlan(parsed.recipients.length, selectedAccounts, { hasPersonalization });
+
+  const campaign = await createCampaign({
+    userId: session.user.id,
+    subject: parsed.subject,
+    bodyHtml: parsed.bodyHtml,
+    bodyText: parsed.bodyText,
+    recipients: parsed.recipients,
+    accountAllocations: plan.allocations,
+  });
 
   await logAudit(session.user.id, "campaign.create", { type: "campaign", id: campaign.id });
 
   void startCampaignRunner(campaign.id);
 
   return { campaignId: campaign.id };
+}
+
+export async function listAccountsForPlanningAction() {
+  const session = await requireSession();
+  return listSmtpAccounts(session.user.id);
+}
+
+const sendPlanSchema = z.object({
+  recipientCount: z.number().int().min(0),
+  hasPersonalization: z.boolean(),
+  accountIds: z.array(z.string()).default([]),
+});
+
+export async function getSendPlanAction(input: z.infer<typeof sendPlanSchema>) {
+  const session = await requireSession();
+  const { recipientCount, hasPersonalization, accountIds } = sendPlanSchema.parse(input);
+  const allAccounts = await listSmtpAccounts(session.user.id);
+  const selected = allAccounts.filter((a) => accountIds.includes(a.id)).map(toPlannerAccount);
+  return buildSendPlan(recipientCount, selected, { hasPersonalization });
 }
 
 const controlSchema = z.object({
