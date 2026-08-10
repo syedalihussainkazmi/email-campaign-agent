@@ -76,7 +76,7 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
       </label>
       <div className="flex flex-col gap-1">
         <label className="text-xs text-zinc-500">
-          Mailbox in real use since (defaults to today — change if it's an existing mailbox)
+          Mailbox in real use since (defaults to today — change if it&apos;s an existing mailbox)
         </label>
         <Input
           type="date"

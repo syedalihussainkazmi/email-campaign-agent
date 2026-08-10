@@ -27,9 +27,11 @@ export function SendPlanPanel({ recipientCount, hasPersonalization, onAccountsRe
   }, []);
 
   // Recompute the plan whenever recipients, template, or the checked accounts change.
+  // (plan is only ever set from the async result below, never synchronously
+  // here — the recipientCount===0 case is already handled by the render
+  // guard further down, so there's nothing to reset it to.)
   useEffect(() => {
     if (recipientCount === 0 || accounts.length === 0) {
-      setPlan(null);
       onAccountsResolved([]);
       return;
     }

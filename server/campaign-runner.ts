@@ -1,5 +1,6 @@
 import { prisma } from "@/database/prisma";
-import { getEmailSenderForUser } from "@/services/email-sender";
+import { getEmailSenderForAccount } from "@/services/email-sender";
+import { incrementSentToday } from "@/services/smtp-service";
 import { getSignature } from "@/services/signature-service";
 import { randomDelaySeconds, sleep } from "@/utils/delay";
 import { renderTemplate } from "@/utils/template";
@@ -9,11 +10,17 @@ const activeRunners = new Set<string>();
 
 /**
  * Drives a campaign's send loop: one recipient at a time, with a random
- * 5-10s delay between sends to avoid tripping Gmail's spam/rate defenses.
- * Progress is written to the DB after every send so a page refresh (or
- * process restart) can resume from persisted state rather than memory.
- * Runs in-process; for multi-instance scale this is the seam to swap in
- * a real job queue (BullMQ/Redis) without touching the rest of the app.
+ * 5-10s delay between sends to avoid tripping spam/rate defenses. Progress
+ * is written to the DB after every send so a page refresh (or process
+ * restart) can resume from persisted state rather than memory. Runs
+ * in-process; for multi-instance scale this is the seam to swap in a real
+ * job queue (BullMQ/Redis) without touching the rest of the app.
+ *
+ * Recipients may be assigned to different SmtpAccounts and different send
+ * days (Task 7), so the sender is resolved per-recipient rather than once
+ * for the whole campaign, and the loop only processes recipients whose
+ * scheduledFor has arrived — anything further out just pauses the campaign
+ * until the next external trigger (see app/api/campaigns/resume-scheduled).
  */
 export async function startCampaignRunner(campaignId: string) {
   if (activeRunners.has(campaignId)) return;
@@ -26,7 +33,6 @@ export async function startCampaignRunner(campaignId: string) {
     });
 
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    const sender = await getEmailSenderForUser(campaign.userId);
     const signature = await getSignature(campaign.userId);
     const signatureIsHtml = looksLikeHtml(signature);
     const signatureHtml = signature
@@ -51,33 +57,54 @@ export async function startCampaignRunner(campaignId: string) {
       }
 
       const next = await prisma.campaignRecipient.findFirst({
-        where: { campaignId, status: "pending" },
-        include: { recipient: true },
+        where: {
+          campaignId,
+          status: "pending",
+          scheduledFor: { lte: new Date() },
+        },
         orderBy: { id: "asc" },
       });
 
       if (!next) {
+        // Either fully done, or everything remaining is scheduled for a future day.
+        const anyFuture = await prisma.campaignRecipient.findFirst({
+          where: { campaignId, status: "pending" },
+        });
         await prisma.campaign.update({
           where: { id: campaignId },
-          data: { status: "completed", completedAt: new Date() },
+          data: anyFuture
+            ? { status: "paused" } // resumes automatically next time the runner is (re)started for this campaign
+            : { status: "completed", completedAt: new Date() },
         });
         return;
       }
 
-      await prisma.campaignRecipient.update({
-        where: { id: next.id },
-        data: { status: "sending" },
-      });
+      await prisma.campaignRecipient.update({ where: { id: next.id }, data: { status: "sending" } });
 
+      if (!next.smtpAccountId) {
+        await prisma.campaignRecipient.update({
+          where: { id: next.id },
+          data: { status: "failed", error: "No SMTP account assigned to this recipient" },
+        });
+        continue;
+      }
+
+      const sender = await getEmailSenderForAccount(next.smtpAccountId, campaign.userId);
+      const recipient = await prisma.recipient.findUniqueOrThrow({ where: { id: next.recipientId } });
       const variables = { businessName: next.name, ownerName: next.ownerName };
+
       const result = await sender.send(campaign.userId, {
-        to: next.recipient.email,
+        to: recipient.email,
         subject: renderTemplate(campaign.subject, variables),
         bodyHtml: renderTemplate(campaign.bodyHtml, variables) + signatureHtml,
         bodyText: campaign.bodyText
           ? renderTemplate(campaign.bodyText, variables) + signatureText
           : undefined,
       });
+
+      if (result.success) {
+        await incrementSentToday(next.smtpAccountId);
+      }
 
       await prisma.$transaction([
         prisma.campaignRecipient.update({
