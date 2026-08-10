@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSendPlan, capForAge, ageInDays } from "@/services/send-planner";
+import { buildSendPlan, capForAge, ageInDays, projectAccountCapacityTimeline } from "@/services/send-planner";
 
 const account = (overrides: Partial<Parameters<typeof buildSendPlan>[1][number]> = {}) => ({
   id: "acc1",
@@ -82,5 +82,41 @@ describe("buildSendPlan", () => {
     const accounts = [account({ isActive: false }), account({ id: "b", label: "B" })];
     const plan = buildSendPlan(10, accounts, { hasPersonalization: true });
     expect(plan.allocations).toEqual([{ accountId: "b", label: "B", count: 10 }]);
+  });
+});
+
+describe("projectAccountCapacityTimeline", () => {
+  it("grows daily capacity as an account ages into the next ramp bracket", () => {
+    const accounts = [
+      { id: "a", label: "A", ageDays: 0, dailyCapOverride: undefined, sentToday: 0, isActive: true },
+    ];
+    const projection = projectAccountCapacityTimeline(accounts, 100000, 10);
+    expect(projection.dailyCapacityByDay[0]).toBe(10); // today, age 0 -> cap 10
+    expect(projection.dailyCapacityByDay[4]).toBe(25); // 4 days from now, age 4 -> cap 25
+  });
+
+  it("reports days until enough cumulative capacity to clear the list", () => {
+    const accounts = [
+      { id: "a", label: "A", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: true },
+    ];
+    const projection = projectAccountCapacityTimeline(accounts, 250, 10);
+    expect(projection.daysToClear).toBe(3); // 100+100+100=300 >= 250 by the 3rd day
+  });
+
+  it("returns null when the horizon isn't long enough to clear the list", () => {
+    const accounts = [
+      { id: "a", label: "A", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: true },
+    ];
+    const projection = projectAccountCapacityTimeline(accounts, 100000, 5);
+    expect(projection.daysToClear).toBeNull();
+  });
+
+  it("ignores inactive accounts", () => {
+    const accounts = [
+      { id: "a", label: "A", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: false },
+      { id: "b", label: "B", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: true },
+    ];
+    const projection = projectAccountCapacityTimeline(accounts, 50, 5);
+    expect(projection.dailyCapacityByDay[0]).toBe(100); // only B counted
   });
 });

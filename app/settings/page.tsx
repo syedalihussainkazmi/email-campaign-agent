@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { SignatureForm } from "@/components/campaign/signature-form";
 import { SmtpAccountList } from "@/components/campaign/smtp-account-list";
 import { RolloutPlannerPanel } from "@/components/campaign/rollout-planner-panel";
+import { CapacityTimelinePanel } from "@/components/campaign/capacity-timeline-panel";
 import { getSignature } from "@/services/signature-service";
 import { listSmtpAccounts } from "@/services/smtp-service";
 
@@ -42,6 +43,18 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <RolloutPlannerPanel />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Capacity Timeline</CardTitle>
+            <CardDescription>
+              Using the accounts you actually have connected right now, and their real ages.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CapacityTimelinePanel />
           </CardContent>
         </Card>
 

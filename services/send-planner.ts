@@ -128,3 +128,38 @@ export function buildSendPlan(
 
   return { totalRecipients: recipientCount, estimatedDays, allocations, warnings };
 }
+
+export interface CapacityProjection {
+  dailyCapacityByDay: number[];
+  daysToClear: number | null;
+}
+
+/**
+ * Projects each active account's daily cap forward (as it ages into higher
+ * ramp brackets) and reports how many days until cumulative capacity would
+ * clear `recipientCount`, or null if that doesn't happen within `horizonDays`.
+ */
+export function projectAccountCapacityTimeline(
+  accounts: PlannerAccount[],
+  recipientCount: number,
+  horizonDays = 90,
+): CapacityProjection {
+  const active = accounts.filter((a) => a.isActive);
+  const dailyCapacityByDay: number[] = [];
+  let cumulative = 0;
+  let daysToClear: number | null = null;
+
+  for (let day = 0; day < horizonDays; day++) {
+    const totalToday = active.reduce((sum, a) => {
+      const cap = a.dailyCapOverride ?? capForAge(a.ageDays + day);
+      return sum + cap;
+    }, 0);
+    dailyCapacityByDay.push(totalToday);
+    cumulative += totalToday;
+    if (daysToClear === null && cumulative >= recipientCount) {
+      daysToClear = day + 1;
+    }
+  }
+
+  return { dailyCapacityByDay, daysToClear };
+}

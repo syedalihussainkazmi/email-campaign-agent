@@ -7,7 +7,7 @@ import { logAudit } from "@/services/audit-service";
 import { startCampaignRunner } from "@/server/campaign-runner";
 import { isRateLimited } from "@/server/rate-limiter";
 import { listSmtpAccounts } from "@/services/smtp-service";
-import { buildSendPlan, toPlannerAccount } from "@/services/send-planner";
+import { buildSendPlan, toPlannerAccount, projectAccountCapacityTimeline } from "@/services/send-planner";
 import { planNewRollout } from "@/services/rollout-planner";
 
 const createCampaignSchema = z.object({
@@ -83,6 +83,15 @@ export async function planRolloutAction(input: z.infer<typeof rolloutPlanSchema>
   await requireSession();
   const { totalRecipients } = rolloutPlanSchema.parse(input);
   return planNewRollout(totalRecipients);
+}
+
+const capacityTimelineSchema = z.object({ recipientCount: z.number().int().min(1) });
+
+export async function projectCapacityTimelineAction(input: z.infer<typeof capacityTimelineSchema>) {
+  const session = await requireSession();
+  const { recipientCount } = capacityTimelineSchema.parse(input);
+  const accounts = (await listSmtpAccounts(session.user.id)).map(toPlannerAccount);
+  return projectAccountCapacityTimeline(accounts, recipientCount);
 }
 
 const controlSchema = z.object({
