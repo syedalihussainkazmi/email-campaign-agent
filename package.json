@@ -22,7 +22,9 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "framer-motion": "^12.42.2",
+    "imapflow": "^1.6.6",
     "lucide-react": "^1.23.0",
+    "mailparser": "^3.9.15",
     "next": "16.2.10",
     "nodemailer": "^7.0.13",
     "prisma": "^6.19.3",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",

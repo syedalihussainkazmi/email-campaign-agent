@@ -24,7 +24,7 @@ export class SmtpEmailSender implements EmailSenderPort {
         auth: { user: this.config.username, pass: this.config.password },
       });
 
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: this.config.fromEmail,
         to: message.to,
         subject: message.subject,
@@ -32,7 +32,7 @@ export class SmtpEmailSender implements EmailSenderPort {
         text: message.bodyText,
       });
 
-      return { success: true };
+      return { success: true, messageId: info.messageId };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : "Unknown SMTP error" };
     }

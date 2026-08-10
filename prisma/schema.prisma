@@ -45,6 +45,10 @@ model SmtpAccount {
   sentTodayDate       DateTime @default(now())
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
+  imapHost            String?
+  imapPort            Int      @default(993)
+  imapSecure          Boolean  @default(true)
+  lastInboxCheckAt    DateTime?
 
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   recipients CampaignRecipient[]
@@ -103,8 +107,9 @@ model Campaign {
   sentCount          Int            @default(0)
   deliveredCount     Int            @default(0)
   failedCount        Int            @default(0)
+  bouncedCount       Int            @default(0)
+  repliedCount       Int            @default(0)
   avgIntervalSeconds Float?
-  googleAccountEmail String?
 
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   recipients CampaignRecipient[]
@@ -137,6 +142,10 @@ model CampaignRecipient {
   status        CampaignRecipientStatus @default(pending)
   sentAt        DateTime?
   error         String?
+  sentMessageId String?
+  bouncedAt     DateTime?
+  bounceReason  String?
+  repliedAt     DateTime?
 
   campaign    Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipient   Recipient    @relation(fields: [recipientId], references: [id], onDelete: Cascade)

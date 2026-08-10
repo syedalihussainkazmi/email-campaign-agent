@@ -11,6 +11,9 @@ export interface SmtpAccountInput {
   fromEmail: string;
   mailboxAgeStartDate: Date;
   dailyCapOverride?: number;
+  imapHost: string;
+  imapPort: number;
+  imapSecure: boolean;
 }
 
 export interface SmtpAccountRecord extends Omit<SmtpAccountInput, "password"> {
@@ -55,6 +58,9 @@ export async function listSmtpAccounts(userId: string): Promise<SmtpAccountRecor
       dailyCapOverride: row.dailyCapOverride ?? undefined,
       sentToday: rolledOver ?? row.sentToday,
       isActive: row.isActive,
+      imapHost: row.imapHost ?? row.host,
+      imapPort: row.imapPort,
+      imapSecure: row.imapSecure,
     });
   }
   return records;
@@ -79,6 +85,9 @@ export async function createSmtpAccount(userId: string, input: SmtpAccountInput)
       fromEmail: input.fromEmail,
       mailboxAgeStartDate: input.mailboxAgeStartDate,
       dailyCapOverride: input.dailyCapOverride,
+      imapHost: input.imapHost,
+      imapPort: input.imapPort,
+      imapSecure: input.imapSecure,
     },
   });
 }

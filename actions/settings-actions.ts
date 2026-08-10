@@ -29,6 +29,9 @@ const smtpAccountSchema = z.object({
   fromEmail: z.string().email(),
   mailboxAgeStartDate: z.coerce.date(),
   dailyCapOverride: z.coerce.number().int().min(1).optional(),
+  imapHost: z.string().min(1),
+  imapPort: z.coerce.number().int().min(1).max(65535).default(993),
+  imapSecure: z.boolean().default(true),
 });
 
 export async function addSmtpAccountAction(input: z.infer<typeof smtpAccountSchema>) {

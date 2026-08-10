@@ -63,6 +63,9 @@ export async function webmailSignInAction(
     label: "Primary",
     ...config,
     mailboxAgeStartDate: assumedMailboxAge,
+    imapHost: parsed.host,
+    imapPort: 993,
+    imapSecure: true,
   });
   await createDatabaseSession(user.id);
 

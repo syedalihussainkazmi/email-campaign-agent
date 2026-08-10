@@ -41,6 +41,8 @@ export default async function HistoryPage() {
                 <span>Total: {c.totalCount}</span>
                 <span>Delivered: {c.deliveredCount}</span>
                 <span>Failed: {c.failedCount}</span>
+                <span>Bounced: {c.bouncedCount}</span>
+                <span>Replied: {c.repliedCount}</span>
               </CardContent>
             </Card>
           </Link>

@@ -113,6 +113,7 @@ export async function startCampaignRunner(campaignId: string) {
             status: result.success ? "sent" : "failed",
             sentAt: new Date(),
             error: result.error,
+            sentMessageId: result.messageId,
           },
         }),
         prisma.campaign.update({

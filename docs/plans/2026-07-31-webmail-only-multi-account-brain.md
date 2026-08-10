@@ -1937,7 +1937,7 @@ git commit -m "Add capacity timeline projection using real connected account age
 
 **Bounces arrive as a plain email to your own inbox** — reading them requires IMAP (read access), a different protocol from SMTP (send-only), so every account needs IMAP credentials too. Most webmail providers use the same username/password for both, just a different port (587/465 for SMTP, 993 for IMAP) — defaulting IMAP host to the same host as SMTP is a reasonable starting guess, overridable.
 
-- [ ] **Step 1: Add IMAP fields to `SmtpAccount`, and outcome-tracking fields to `CampaignRecipient`**
+- [x] **Step 1: Add IMAP fields to `SmtpAccount`, and outcome-tracking fields to `CampaignRecipient`**
 
 ```prisma
 model SmtpAccount {
@@ -1963,15 +1963,15 @@ model Campaign {
 }
 ```
 
-- [ ] **Step 2: Run the migration**
+- [x] **Step 2: Run the migration**
 
 Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_imap_and_outcome_tracking`
 
-- [ ] **Step 3: Install IMAP + mail-parsing libraries**
+- [x] **Step 3: Install IMAP + mail-parsing libraries**
 
 Run: `cd /home/user/email-campaign-agent && npm install imapflow mailparser && npm install -D @types/mailparser`
 
-- [ ] **Step 4: Write the failing bounce-detector tests**
+- [x] **Step 4: Write the failing bounce-detector tests**
 
 ```typescript
 import { describe, it, expect } from "vitest";
@@ -2025,12 +2025,12 @@ describe("detectBounce", () => {
 });
 ```
 
-- [ ] **Step 5: Run to verify it fails**
+- [x] **Step 5: Run to verify it fails**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/bounce-detector.test.ts`
 Expected: FAIL — `Cannot find module '@/services/bounce-detector'`
 
-- [ ] **Step 6: Implement `services/bounce-detector.ts`**
+- [x] **Step 6: Implement `services/bounce-detector.ts`**
 
 ```typescript
 export interface InboundMessage {
@@ -2070,12 +2070,12 @@ export function detectBounce(message: InboundMessage): BounceResult {
 }
 ```
 
-- [ ] **Step 7: Run to verify it passes**
+- [x] **Step 7: Run to verify it passes**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/bounce-detector.test.ts`
 Expected: PASS — 4 tests.
 
-- [ ] **Step 8: Capture and store `sentMessageId` when sending**
+- [x] **Step 8: Capture and store `sentMessageId` when sending**
 
 In `services/smtp-sender.ts`, extend the return type and capture nodemailer's real `messageId`:
 ```typescript
@@ -2109,7 +2109,7 @@ await prisma.campaignRecipient.update({
 });
 ```
 
-- [ ] **Step 9: Build `services/imap-service.ts`**
+- [x] **Step 9: Build `services/imap-service.ts`**
 
 ```typescript
 import { ImapFlow } from "imapflow";
@@ -2173,7 +2173,7 @@ export async function fetchMessagesSince(
 }
 ```
 
-- [ ] **Step 10: Build `server/inbox-poller.ts`**
+- [x] **Step 10: Build `server/inbox-poller.ts`**
 
 ```typescript
 import { prisma } from "@/database/prisma";
@@ -2269,7 +2269,7 @@ export async function pollAllInboxes(): Promise<{ checked: number; bounces: numb
 }
 ```
 
-- [ ] **Step 11: Add the trigger route**
+- [x] **Step 11: Add the trigger route**
 
 ```typescript
 // app/api/campaigns/poll-inbox/route.ts
@@ -2282,7 +2282,7 @@ export async function GET() {
 }
 ```
 
-- [ ] **Step 12: Thread IMAP fields through the account CRUD and form**
+- [x] **Step 12: Thread IMAP fields through the account CRUD and form**
 
 In `services/smtp-service.ts`, extend `SmtpAccountInput`/`SmtpAccountRecord` and the create/list functions:
 ```typescript
@@ -2343,7 +2343,7 @@ async function handleSave() {
 <Input placeholder="IMAP port (993)" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
 ```
 
-- [ ] **Step 13: Typecheck, test, commit**
+- [x] **Step 13: Typecheck, test, commit**
 
 Run: `npx tsc --noEmit && npx vitest run`
 ```bash
@@ -2361,7 +2361,7 @@ git commit -m "Add IMAP-based bounce detection"
 
 (`server/inbox-poller.ts` from Task 14 already calls `detectReply` — this task fills that module in.)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```typescript
 import { describe, it, expect } from "vitest";
@@ -2409,12 +2409,12 @@ describe("detectReply", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/reply-detector.test.ts`
 Expected: FAIL — `Cannot find module '@/services/reply-detector'`
 
-- [ ] **Step 3: Implement `services/reply-detector.ts`**
+- [x] **Step 3: Implement `services/reply-detector.ts`**
 
 ```typescript
 import type { FetchedMessage } from "@/services/imap-service";
@@ -2449,12 +2449,12 @@ export function detectReply(message: FetchedMessage, outstanding: OutstandingRec
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/reply-detector.test.ts`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Surface bounce/reply counts on `app/history/page.tsx`**
+- [x] **Step 5: Surface bounce/reply counts on `app/history/page.tsx`**
 
 This page renders one `Card` per campaign with a row of `Total`/`Delivered`/`Failed` counts inside `CardContent`. Add `Bounced`/`Replied` to that same row, reading the new `bouncedCount`/`repliedCount` fields from Task 14 Step 1:
 
@@ -2468,7 +2468,7 @@ This page renders one `Card` per campaign with a row of `Total`/`Delivered`/`Fai
 </CardContent>
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A

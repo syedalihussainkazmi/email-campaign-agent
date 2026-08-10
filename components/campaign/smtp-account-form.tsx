@@ -20,6 +20,9 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
   // Defaults to "added today" (a brand-new mailbox); edit this if the
   // account has actually been in real use for longer.
   const [mailboxAgeStartDate, setMailboxAgeStartDate] = useState(todayInputValue());
+  const [imapHost, setImapHost] = useState("");
+  const [imapPort, setImapPort] = useState("993");
+  const [imapSecure, setImapSecure] = useState(true);
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +38,9 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
       password,
       fromEmail,
       mailboxAgeStartDate: new Date(mailboxAgeStartDate),
+      imapHost: imapHost || host,
+      imapPort: Number(imapPort),
+      imapSecure,
     });
     if (result.ok) {
       setLabel("");
@@ -42,6 +48,7 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
       setUsername("");
       setPassword("");
       setFromEmail("");
+      setImapHost("");
       setStatus("idle");
       onAdded();
     } else {
@@ -83,6 +90,23 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
           value={mailboxAgeStartDate}
           onChange={(e) => setMailboxAgeStartDate(e.target.value)}
         />
+      </div>
+      <div className="flex flex-col gap-2 border-t border-zinc-800 pt-3">
+        <label className="text-xs text-zinc-500">
+          IMAP (for bounce/reply detection — usually the same host, different port)
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <Input
+            placeholder="IMAP host (blank = same as SMTP host)"
+            value={imapHost}
+            onChange={(e) => setImapHost(e.target.value)}
+          />
+          <Input placeholder="IMAP port (993)" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input type="checkbox" checked={imapSecure} onChange={(e) => setImapSecure(e.target.checked)} />
+          Use SSL/TLS (port 993)
+        </label>
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <Button size="sm" onClick={handleSave} disabled={status === "saving"}>

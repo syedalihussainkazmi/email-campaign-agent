@@ -11,6 +11,7 @@ export interface OutgoingEmail {
 export interface SendResult {
   success: boolean;
   error?: string;
+  messageId?: string;
 }
 
 /** Port every email transport must implement. */
