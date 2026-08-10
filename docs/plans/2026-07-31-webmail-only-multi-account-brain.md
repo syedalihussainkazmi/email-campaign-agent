@@ -25,8 +25,14 @@ This plan covers four subsystems that depend on each other in sequence (auth cle
 | `utils/dev-login.ts` | Deleted. |
 | `prisma/schema.prisma` | `Account` model dropped; `User.role` kept; new `SmtpAccount` model; `CampaignRecipient` gains `smtpAccountId` + `scheduledFor`. |
 | `services/smtp-service.ts` | Rewritten from single-blob-per-user to full CRUD over `SmtpAccount` rows (list/create/update/delete/get). |
-| `services/send-planner.ts` | New. Pure function: `(recipientCount, accounts, template) => SendPlan`. |
+| `services/send-planner.ts` | New. Pure functions: `buildSendPlan` (today's allocation), `capForAge`/`ageInDays` (the ramp curve), `projectAccountCapacityTimeline` (forward projection for existing accounts). |
 | `tests/send-planner.test.ts` | New. |
+| `services/rollout-planner.ts` | New. Pure "what-if I'm starting from zero" calculator: `planNewRollout(totalRecipients, options) => { accountsNeeded, domainsNeeded, timeline }`. |
+| `tests/rollout-planner.test.ts` | New. |
+| `services/domain-age-service.ts` | New. Best-effort domain-age lookup via public WHOIS, plus a pure `parseWhoisDate` helper. |
+| `tests/domain-age-service.test.ts` | New — covers only the pure date-parsing helper, not the live network call. |
+| `components/campaign/rollout-planner-panel.tsx` | New. "If I want to send N emails, how many accounts/domains do I need" calculator, in Settings. |
+| `components/campaign/capacity-timeline-panel.tsx` | New. Projects days-to-clear using your *actual* connected accounts and their real ages, in Settings. |
 | `components/campaign/smtp-account-list.tsx` | New. Replaces `smtp-form.tsx` — lists accounts, add/edit/delete. |
 | `components/campaign/smtp-account-form.tsx` | New. Single-account add/edit form (extracted from old `smtp-form.tsx`). |
 | `components/campaign/send-plan-panel.tsx` | New. Shows the computed plan + account selection before sending. |
@@ -208,7 +214,9 @@ model SmtpAccount {
   username          String
   encryptedPassword String
   fromEmail         String
-  warmupStage       String    @default("new") // new | warming | established
+  // The date warmup/age is calculated from — defaults to "added today" but
+  // editable, since an account may already be an established real mailbox.
+  mailboxAgeStartDate DateTime @default(now())
   dailyCapOverride  Int?
   sentToday         Int       @default(0)
   sentTodayDate     DateTime  @default(now())
@@ -230,8 +238,6 @@ Add `smtpAccounts SmtpAccount[]` to `model User`.
 import { prisma } from "@/database/prisma";
 import { encryptToken, decryptToken } from "@/services/token-service";
 
-export type WarmupStage = "new" | "warming" | "established";
-
 export interface SmtpAccountInput {
   label: string;
   host: string;
@@ -240,7 +246,7 @@ export interface SmtpAccountInput {
   username: string;
   password: string;
   fromEmail: string;
-  warmupStage: WarmupStage;
+  mailboxAgeStartDate: Date;
   dailyCapOverride?: number;
 }
 
@@ -282,7 +288,7 @@ export async function listSmtpAccounts(userId: string): Promise<SmtpAccountRecor
       secure: row.secure,
       username: row.username,
       fromEmail: row.fromEmail,
-      warmupStage: row.warmupStage as WarmupStage,
+      mailboxAgeStartDate: row.mailboxAgeStartDate,
       dailyCapOverride: row.dailyCapOverride ?? undefined,
       sentToday: rolledOver ?? row.sentToday,
       isActive: row.isActive,
@@ -308,7 +314,7 @@ export async function createSmtpAccount(userId: string, input: SmtpAccountInput)
       username: input.username,
       encryptedPassword: encryptToken(input.password),
       fromEmail: input.fromEmail,
-      warmupStage: input.warmupStage,
+      mailboxAgeStartDate: input.mailboxAgeStartDate,
       dailyCapOverride: input.dailyCapOverride,
     },
   });
@@ -362,7 +368,7 @@ const smtpAccountSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
   fromEmail: z.string().email(),
-  warmupStage: z.enum(["new", "warming", "established"]),
+  mailboxAgeStartDate: z.coerce.date(),
   dailyCapOverride: z.coerce.number().int().min(1).optional(),
 });
 
@@ -398,13 +404,10 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { addSmtpAccountAction } from "@/actions/settings-actions";
-import type { WarmupStage } from "@/services/smtp-service";
 
-const WARMUP_LABELS: Record<WarmupStage, string> = {
-  new: "New (< 2 weeks old) — ~15/day safe",
-  warming: "Warming up (2–8 weeks) — ~40/day safe",
-  established: "Established (2+ months, regular use) — ~100/day safe",
-};
+function todayInputValue(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
   const [label, setLabel] = useState("");
@@ -414,7 +417,10 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fromEmail, setFromEmail] = useState("");
-  const [warmupStage, setWarmupStage] = useState<WarmupStage>("new");
+  // Defaults to "added today" (a brand-new mailbox); edit this if the
+  // account has actually been in real use for longer. Task 12 adds a
+  // "Detect from domain" button that suggests a value here via WHOIS.
+  const [mailboxAgeStartDate, setMailboxAgeStartDate] = useState(todayInputValue());
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -429,7 +435,7 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
       username,
       password,
       fromEmail,
-      warmupStage,
+      mailboxAgeStartDate: new Date(mailboxAgeStartDate),
     });
     if (result.ok) {
       setLabel("");
@@ -469,17 +475,16 @@ export function SmtpAccountForm({ onAdded }: { onAdded: () => void }) {
         <input type="checkbox" checked={secure} onChange={(e) => setSecure(e.target.checked)} />
         Use SSL/TLS (port 465)
       </label>
-      <select
-        value={warmupStage}
-        onChange={(e) => setWarmupStage(e.target.value as WarmupStage)}
-        className="rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200"
-      >
-        {(Object.keys(WARMUP_LABELS) as WarmupStage[]).map((stage) => (
-          <option key={stage} value={stage}>
-            {WARMUP_LABELS[stage]}
-          </option>
-        ))}
-      </select>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-zinc-500">
+          Mailbox in real use since (defaults to today — change if it's an existing mailbox)
+        </label>
+        <Input
+          type="date"
+          value={mailboxAgeStartDate}
+          onChange={(e) => setMailboxAgeStartDate(e.target.value)}
+        />
+      </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <Button size="sm" onClick={handleSave} disabled={status === "saving"}>
         {status === "saving" ? "Verifying…" : "Add Account"}
@@ -501,6 +506,7 @@ import { Button } from "@/components/ui/button";
 import { SmtpAccountForm } from "@/components/campaign/smtp-account-form";
 import { removeSmtpAccountAction } from "@/actions/settings-actions";
 import type { SmtpAccountRecord } from "@/services/smtp-service";
+import { ageInDays, capForAge } from "@/services/send-planner";
 
 export function SmtpAccountList({ accounts }: { accounts: SmtpAccountRecord[] }) {
   const router = useRouter();
@@ -521,7 +527,9 @@ export function SmtpAccountList({ accounts }: { accounts: SmtpAccountRecord[] })
           <div>
             <p className="text-sm font-medium text-zinc-100">{account.label}</p>
             <p className="text-xs text-zinc-500">
-              {account.fromEmail} · {account.warmupStage} · sent today: {account.sentToday}
+              {account.fromEmail} · {ageInDays(account.mailboxAgeStartDate)} days old · safe cap{" "}
+              {account.dailyCapOverride ?? capForAge(ageInDays(account.mailboxAgeStartDate))}/day ·
+              sent today: {account.sentToday}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -599,6 +607,9 @@ git commit -m "Replace single SMTP config with a multi-account Settings UI"
 ```typescript
 import { createSmtpAccount } from "@/services/smtp-service";
 // ...
+const assumedMailboxAge = new Date();
+assumedMailboxAge.setDate(assumedMailboxAge.getDate() - 90); // treat as "established" by default
+
 await createSmtpAccount(user.id, {
   label: "Primary",
   host: parsed.host,
@@ -607,10 +618,10 @@ await createSmtpAccount(user.id, {
   username: parsed.email,
   password: parsed.password,
   fromEmail: parsed.email,
-  warmupStage: "established",
+  mailboxAgeStartDate: assumedMailboxAge,
 });
 ```
-(Defaulting the very first account to `"established"` is a deliberate choice: it's presumably an existing mailbox they already use, not a throwaway new one — they can edit this later in Settings.)
+(Backdating the very first account's age by 90 days is a deliberate choice: it's presumably an existing mailbox they already use to sign in, not a throwaway new one — they can correct this to the real age later in Settings, or use the WHOIS detector from Task 12.)
 
 - [ ] **Step 2: Typecheck and test**
 
@@ -636,16 +647,38 @@ git commit -m "Webmail sign-in creates the first SmtpAccount"
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { buildSendPlan } from "@/services/send-planner";
+import { buildSendPlan, capForAge, ageInDays } from "@/services/send-planner";
 
 const account = (overrides: Partial<Parameters<typeof buildSendPlan>[1][number]> = {}) => ({
   id: "acc1",
   label: "Main",
-  warmupStage: "established" as const,
+  ageDays: 90, // established, cap 100
   dailyCapOverride: undefined,
   sentToday: 0,
   isActive: true,
   ...overrides,
+});
+
+describe("capForAge", () => {
+  it("follows the ramp schedule as the account gets older", () => {
+    expect(capForAge(0)).toBe(10);
+    expect(capForAge(3)).toBe(10);
+    expect(capForAge(4)).toBe(25);
+    expect(capForAge(14)).toBe(25);
+    expect(capForAge(15)).toBe(50);
+    expect(capForAge(29)).toBe(50);
+    expect(capForAge(30)).toBe(75);
+    expect(capForAge(59)).toBe(75);
+    expect(capForAge(60)).toBe(100);
+    expect(capForAge(365)).toBe(100);
+  });
+});
+
+describe("ageInDays", () => {
+  it("computes whole days elapsed since a given date", () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 86400000);
+    expect(ageInDays(tenDaysAgo)).toBe(10);
+  });
 });
 
 describe("buildSendPlan", () => {
@@ -658,14 +691,14 @@ describe("buildSendPlan", () => {
 
   it("splits across multiple accounts respecting each one's remaining cap", () => {
     const accounts = [
-      account({ id: "a", label: "A", warmupStage: "new" }), // cap 15
-      account({ id: "b", label: "B", warmupStage: "warming" }), // cap 40
+      account({ id: "a", label: "A", ageDays: 1 }), // cap 10
+      account({ id: "b", label: "B", ageDays: 10 }), // cap 25
     ];
-    const plan = buildSendPlan(50, accounts, { hasPersonalization: true });
+    const plan = buildSendPlan(30, accounts, { hasPersonalization: true });
     expect(plan.estimatedDays).toBe(1);
     expect(plan.allocations).toEqual([
-      { accountId: "a", label: "A", count: 15 },
-      { accountId: "b", label: "B", count: 35 },
+      { accountId: "b", label: "B", count: 25 },
+      { accountId: "a", label: "A", count: 5 },
     ]);
   });
 
@@ -709,24 +742,43 @@ Expected: FAIL — `Cannot find module '@/services/send-planner'`
 - [ ] **Step 3: Implement `services/send-planner.ts`**
 
 ```typescript
-export type WarmupStage = "new" | "warming" | "established";
+export interface RampStep {
+  minAgeDays: number;
+  dailyCap: number;
+}
 
 /**
- * Conservative daily-safe-send ceilings per mailbox, by trust level. These
- * are heuristics from common cold-outreach deliverability guidance, not a
- * guarantee — override per account in Settings if you know your account's
- * real limits are different.
+ * Conservative daily-safe-send ceiling by mailbox age, ramping up over
+ * time. These are heuristics from common cold-outreach/warm-up guidance,
+ * not a guarantee from any provider — override per account in Settings
+ * (dailyCapOverride) if you know your real limits differ.
  */
-const WARMUP_CAPS: Record<WarmupStage, number> = {
-  new: 15,
-  warming: 40,
-  established: 100,
-};
+export const DEFAULT_RAMP_SCHEDULE: RampStep[] = [
+  { minAgeDays: 0, dailyCap: 10 },
+  { minAgeDays: 4, dailyCap: 25 },
+  { minAgeDays: 15, dailyCap: 50 },
+  { minAgeDays: 30, dailyCap: 75 },
+  { minAgeDays: 60, dailyCap: 100 },
+];
+
+/** The safe daily cap for a mailbox of the given age, per the ramp schedule. */
+export function capForAge(ageDays: number, schedule: RampStep[] = DEFAULT_RAMP_SCHEDULE): number {
+  let cap = schedule[0].dailyCap;
+  for (const step of schedule) {
+    if (ageDays >= step.minAgeDays) cap = step.dailyCap;
+  }
+  return cap;
+}
+
+/** Whole days elapsed since `since`. */
+export function ageInDays(since: Date): number {
+  return Math.floor((Date.now() - since.getTime()) / 86400000);
+}
 
 export interface PlannerAccount {
   id: string;
   label: string;
-  warmupStage: WarmupStage;
+  ageDays: number;
   dailyCapOverride?: number;
   sentToday: number;
   isActive: boolean;
@@ -740,11 +792,30 @@ export interface SendPlan {
 }
 
 function dailyCapFor(account: PlannerAccount): number {
-  return account.dailyCapOverride ?? WARMUP_CAPS[account.warmupStage];
+  return account.dailyCapOverride ?? capForAge(account.ageDays);
 }
 
 function remainingToday(account: PlannerAccount): number {
   return Math.max(0, dailyCapFor(account) - account.sentToday);
+}
+
+/** Converts a stored SmtpAccount-shaped record (mailboxAgeStartDate) into a PlannerAccount (ageDays). */
+export function toPlannerAccount(account: {
+  id: string;
+  label: string;
+  mailboxAgeStartDate: Date;
+  dailyCapOverride?: number;
+  sentToday: number;
+  isActive: boolean;
+}): PlannerAccount {
+  return {
+    id: account.id,
+    label: account.label,
+    ageDays: ageInDays(account.mailboxAgeStartDate),
+    dailyCapOverride: account.dailyCapOverride,
+    sentToday: account.sentToday,
+    isActive: account.isActive,
+  };
 }
 
 /**
@@ -806,7 +877,7 @@ export function buildSendPlan(
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/send-planner.test.ts`
-Expected: PASS — 7 tests.
+Expected: PASS — 9 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -849,6 +920,7 @@ export async function listAccountsForPlanningAction() {
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { SendPlan } from "@/services/send-planner";
+import { ageInDays } from "@/services/send-planner";
 import type { SmtpAccountRecord } from "@/services/smtp-service";
 import { getSendPlanAction, listAccountsForPlanningAction } from "@/actions/campaign-actions";
 
@@ -902,7 +974,8 @@ export function SendPlanPanel({ recipientCount, hasPersonalization, onAccountsRe
               checked={selectedIds.includes(account.id)}
               onChange={() => toggle(account.id)}
             />
-            {account.label} ({account.warmupStage}, {account.sentToday} sent today)
+            {account.label} ({ageInDays(account.mailboxAgeStartDate)}d old, {account.sentToday} sent
+            today)
           </label>
         ))}
       </div>
@@ -933,6 +1006,8 @@ export function SendPlanPanel({ recipientCount, hasPersonalization, onAccountsRe
 - [ ] **Step 4: Update `getSendPlanAction` to accept and filter by `accountIds`**
 
 ```typescript
+import { buildSendPlan, toPlannerAccount } from "@/services/send-planner";
+
 const sendPlanSchema = z.object({
   recipientCount: z.number().int().min(0),
   hasPersonalization: z.boolean(),
@@ -943,7 +1018,7 @@ export async function getSendPlanAction(input: z.infer<typeof sendPlanSchema>) {
   const session = await requireSession();
   const { recipientCount, hasPersonalization, accountIds } = sendPlanSchema.parse(input);
   const allAccounts = await listSmtpAccounts(session.user.id);
-  const selected = allAccounts.filter((a) => accountIds.includes(a.id));
+  const selected = allAccounts.filter((a) => accountIds.includes(a.id)).map(toPlannerAccount);
   return buildSendPlan(recipientCount, selected, { hasPersonalization });
 }
 ```
@@ -1112,7 +1187,7 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
   // Re-filter to exactly the accounts the user had checked in the SendPlanPanel —
   // never silently fall back to "all active accounts" at send time.
   const allAccounts = await listSmtpAccounts(session.user.id);
-  const selectedAccounts = allAccounts.filter((a) => parsed.accountIds.includes(a.id));
+  const selectedAccounts = allAccounts.filter((a) => parsed.accountIds.includes(a.id)).map(toPlannerAccount);
   const plan = buildSendPlan(parsed.recipients.length, selectedAccounts, { hasPersonalization });
 
   const campaign = await createCampaign({
@@ -1313,8 +1388,528 @@ git commit -m "Clean up dead OAuth env vars after webmail-only migration"
 
 ---
 
+### Task 11: "Starting from zero" volume calculator
+
+**Files:**
+- Create: `services/rollout-planner.ts`
+- Test: `tests/rollout-planner.test.ts`
+- Create: `components/campaign/rollout-planner-panel.tsx`
+- Modify: `actions/campaign-actions.ts` (add `planRolloutAction`)
+- Modify: `app/settings/page.tsx` (render the new panel)
+
+This is the hypothetical "if I want to send N emails total, how many accounts and domains do I need, and how long will it take" calculator — independent of whatever's currently connected, purely a planning tool.
+
+- [ ] **Step 1: Write the failing tests**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { planNewRollout } from "@/services/rollout-planner";
+
+describe("planNewRollout", () => {
+  it("reaches the target recipient count within its own timeline", () => {
+    const plan = planNewRollout(500);
+    expect(plan.accountsNeeded).toBeGreaterThanOrEqual(1);
+    expect(plan.timeline[plan.timeline.length - 1].cumulativeCapacity).toBeGreaterThanOrEqual(500);
+  });
+
+  it("needs at least as many accounts for a much larger target", () => {
+    const small = planNewRollout(500);
+    const large = planNewRollout(50000);
+    expect(large.accountsNeeded).toBeGreaterThanOrEqual(small.accountsNeeded);
+  });
+
+  it("derives domainsNeeded from accountsNeeded and mailboxesPerDomain", () => {
+    const plan = planNewRollout(50000, { mailboxesPerDomain: 4 });
+    expect(plan.domainsNeeded).toBe(Math.ceil(plan.accountsNeeded / 4));
+  });
+
+  it("respects an explicit account count instead of searching for the minimum", () => {
+    const plan = planNewRollout(1000, { maxAccounts: 3 });
+    expect(plan.accountsNeeded).toBe(3);
+  });
+
+  it("produces a non-decreasing cumulative capacity timeline", () => {
+    const plan = planNewRollout(2000);
+    for (let i = 1; i < plan.timeline.length; i++) {
+      expect(plan.timeline[i].cumulativeCapacity).toBeGreaterThanOrEqual(
+        plan.timeline[i - 1].cumulativeCapacity,
+      );
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/rollout-planner.test.ts`
+Expected: FAIL — `Cannot find module '@/services/rollout-planner'`
+
+- [ ] **Step 3: Implement `services/rollout-planner.ts`**
+
+```typescript
+import { DEFAULT_RAMP_SCHEDULE, capForAge, type RampStep } from "@/services/send-planner";
+
+// Guideline ceiling: putting too many cold-outreach mailboxes on one domain
+// risks the *domain's* reputation regardless of individual mailbox health.
+const DEFAULT_MAILBOXES_PER_DOMAIN = 4;
+const MAX_HORIZON_DAYS = 90;
+const MAX_ACCOUNTS_TO_TRY = 50;
+
+export interface RolloutOptions {
+  mailboxesPerDomain?: number;
+  maxAccounts?: number; // if set, skips the search and just projects this account count
+  schedule?: RampStep[];
+}
+
+export interface RolloutPlan {
+  accountsNeeded: number;
+  domainsNeeded: number;
+  timeline: { day: number; cumulativeCapacity: number }[];
+}
+
+function cumulativeTimelineFor(
+  accounts: number,
+  totalRecipients: number,
+  schedule: RampStep[],
+): { day: number; cumulativeCapacity: number }[] {
+  const timeline: { day: number; cumulativeCapacity: number }[] = [];
+  let cumulative = 0;
+  for (let day = 0; day < MAX_HORIZON_DAYS; day++) {
+    cumulative += capForAge(day, schedule) * accounts;
+    timeline.push({ day, cumulativeCapacity: cumulative });
+    if (cumulative >= totalRecipients) break;
+  }
+  return timeline;
+}
+
+/**
+ * Computes how many brand-new accounts (all starting today) and domains
+ * you'd need to safely clear `totalRecipients`, plus the day-by-day
+ * cumulative capacity as they ramp up. Pure function — no I/O.
+ */
+export function planNewRollout(totalRecipients: number, options: RolloutOptions = {}): RolloutPlan {
+  const mailboxesPerDomain = options.mailboxesPerDomain ?? DEFAULT_MAILBOXES_PER_DOMAIN;
+  const schedule = options.schedule ?? DEFAULT_RAMP_SCHEDULE;
+
+  let accountsNeeded = options.maxAccounts ?? 1;
+  if (!options.maxAccounts) {
+    while (accountsNeeded < MAX_ACCOUNTS_TO_TRY) {
+      const timeline = cumulativeTimelineFor(accountsNeeded, totalRecipients, schedule);
+      if (timeline[timeline.length - 1].cumulativeCapacity >= totalRecipients) break;
+      accountsNeeded++;
+    }
+  }
+
+  return {
+    accountsNeeded,
+    domainsNeeded: Math.ceil(accountsNeeded / mailboxesPerDomain),
+    timeline: cumulativeTimelineFor(accountsNeeded, totalRecipients, schedule),
+  };
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/rollout-planner.test.ts`
+Expected: PASS — 5 tests.
+
+- [ ] **Step 5: Add the server action**
+
+```typescript
+// in actions/campaign-actions.ts
+import { planNewRollout } from "@/services/rollout-planner";
+
+const rolloutPlanSchema = z.object({ totalRecipients: z.number().int().min(1) });
+
+export async function planRolloutAction(input: z.infer<typeof rolloutPlanSchema>) {
+  await requireSession();
+  const { totalRecipients } = rolloutPlanSchema.parse(input);
+  return planNewRollout(totalRecipients);
+}
+```
+
+- [ ] **Step 6: Build the panel**
+
+```typescript
+"use client";
+
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { planRolloutAction } from "@/actions/campaign-actions";
+import type { RolloutPlan } from "@/services/rollout-planner";
+
+export function RolloutPlannerPanel() {
+  const [totalRecipients, setTotalRecipients] = useState("");
+  const [plan, setPlan] = useState<RolloutPlan | null>(null);
+
+  async function handleCalculate() {
+    const n = Number(totalRecipients);
+    if (!n || n < 1) return;
+    setPlan(await planRolloutAction({ totalRecipients: n }));
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-zinc-500">
+        "If I want to send this many emails total, starting from zero, how many accounts and domains
+        do I need?" — assumes every account is brand new today.
+      </p>
+      <div className="flex gap-2">
+        <Input
+          placeholder="Total emails to send"
+          value={totalRecipients}
+          onChange={(e) => setTotalRecipients(e.target.value)}
+        />
+        <Button size="sm" onClick={handleCalculate}>
+          Calculate
+        </Button>
+      </div>
+      {plan && (
+        <div className="rounded-lg border border-zinc-800 p-4 text-sm text-zinc-300">
+          <p>Accounts needed: {plan.accountsNeeded}</p>
+          <p>Domains needed (~4 mailboxes/domain): {plan.domainsNeeded}</p>
+          <p>Days to clear at that pace: {plan.timeline.length}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 7: Render it in `app/settings/page.tsx`** as its own card, and typecheck
+
+Run: `npx tsc --noEmit`
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add -A
+git commit -m "Add the starting-from-zero volume/domain calculator"
+```
+
+---
+
+### Task 12: Domain-age detection (best-effort WHOIS suggestion)
+
+**⚠ Before executing this task**: this adds a new dependency (`whois-json`) and makes outbound WHOIS network calls (port 43, not HTTPS) to third-party registrar servers — confirm you're fine with that network behavior before building it. It is explicitly a *suggestion to review and confirm*, not an authoritative fact: it detects the **domain's** registration date, not the mailbox's actual creation date, and many registrars redact this behind privacy protection, in which case it'll say so and ask for manual entry.
+
+**Files:**
+- Create: `services/domain-age-service.ts`
+- Test: `tests/domain-age-service.test.ts` (pure date-parsing logic only, not the live network call)
+- Modify: `actions/settings-actions.ts` (add `detectDomainAgeAction`)
+- Modify: `components/campaign/smtp-account-form.tsx` (add a "Detect from domain" button)
+
+- [ ] **Step 1: Install the WHOIS package**
+
+Run: `cd /home/user/email-campaign-agent && npm install whois-json`
+
+- [ ] **Step 2: Write the failing test for the pure parsing helper**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { parseWhoisDate } from "@/services/domain-age-service";
+
+describe("parseWhoisDate", () => {
+  it("parses a valid date string from a WHOIS record", () => {
+    const parsed = parseWhoisDate("2020-01-15T00:00:00Z");
+    expect(parsed?.getFullYear()).toBe(2020);
+  });
+
+  it("returns null for missing or unparseable input", () => {
+    expect(parseWhoisDate(undefined)).toBeNull();
+    expect(parseWhoisDate("not-a-date")).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 3: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/domain-age-service.test.ts`
+Expected: FAIL — `Cannot find module '@/services/domain-age-service'`
+
+- [ ] **Step 4: Implement `services/domain-age-service.ts`**
+
+```typescript
+import whois from "whois-json";
+
+export interface DomainAgeResult {
+  domain: string;
+  registeredAt: Date | null;
+  ageDays: number | null;
+  confidence: "found" | "unavailable";
+}
+
+/** Pure — parses whatever date-ish string a WHOIS record returned, or null if unusable. */
+export function parseWhoisDate(raw: string | undefined): Date | null {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Best-effort domain age via public WHOIS. This is the DOMAIN's registration
+ * date, not the mailbox's actual creation date — use as a starting
+ * suggestion to confirm/override, never as ground truth. Many registrars
+ * redact this via privacy protection, in which case confidence is
+ * "unavailable" and the caller should fall back to manual entry.
+ */
+export async function detectDomainAge(domain: string): Promise<DomainAgeResult> {
+  try {
+    const data = (await whois(domain)) as Record<string, string | undefined>;
+    const raw = data.creationDate ?? data.createdDate ?? data.registered;
+    const registeredAt = parseWhoisDate(raw);
+
+    if (!registeredAt) {
+      return { domain, registeredAt: null, ageDays: null, confidence: "unavailable" };
+    }
+
+    const ageDays = Math.floor((Date.now() - registeredAt.getTime()) / 86400000);
+    return { domain, registeredAt, ageDays, confidence: "found" };
+  } catch {
+    return { domain, registeredAt: null, ageDays: null, confidence: "unavailable" };
+  }
+}
+```
+
+- [ ] **Step 5: Run to verify the parsing test passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/domain-age-service.test.ts`
+Expected: PASS — 2 tests.
+
+- [ ] **Step 6: Add the server action**
+
+```typescript
+// in actions/settings-actions.ts
+import { detectDomainAge } from "@/services/domain-age-service";
+
+const detectDomainAgeSchema = z.object({ email: z.string().email() });
+
+export async function detectDomainAgeAction(input: z.infer<typeof detectDomainAgeSchema>) {
+  await requireSession();
+  const { email } = detectDomainAgeSchema.parse(input);
+  const domain = email.split("@")[1];
+  return detectDomainAge(domain);
+}
+```
+
+- [ ] **Step 7: Add the "Detect from domain" button to `smtp-account-form.tsx`**
+
+Add below the `fromEmail` input:
+```typescript
+const [detecting, setDetecting] = useState(false);
+const [detectNote, setDetectNote] = useState<string | null>(null);
+
+async function handleDetect() {
+  if (!fromEmail.includes("@")) return;
+  setDetecting(true);
+  setDetectNote(null);
+  const result = await detectDomainAgeAction({ email: fromEmail });
+  if (result.confidence === "found" && result.registeredAt) {
+    setMailboxAgeStartDate(new Date(result.registeredAt).toISOString().slice(0, 10));
+    setDetectNote(
+      `Estimated from domain registration (${result.ageDays} days old) — adjust if the mailbox ` +
+        `itself is newer than the domain.`,
+    );
+  } else {
+    setDetectNote("Couldn't detect this domain's age (often privacy-protected) — enter it manually.");
+  }
+  setDetecting(false);
+}
+// ...
+<Button type="button" size="sm" variant="outline" onClick={handleDetect} disabled={detecting}>
+  {detecting ? "Checking…" : "Detect from domain"}
+</Button>
+{detectNote && <p className="text-xs text-zinc-500">{detectNote}</p>}
+```
+(Import `detectDomainAgeAction` from `@/actions/settings-actions`.)
+
+- [ ] **Step 8: Typecheck and commit**
+
+Run: `npx tsc --noEmit`
+```bash
+git add -A
+git commit -m "Add best-effort domain-age detection via WHOIS to the account form"
+```
+
+---
+
+### Task 13: Capacity timeline for your *actual* connected accounts
+
+**Files:**
+- Modify: `services/send-planner.ts` (add `projectAccountCapacityTimeline`)
+- Modify: `tests/send-planner.test.ts`
+- Create: `components/campaign/capacity-timeline-panel.tsx`
+- Modify: `actions/campaign-actions.ts` (add `projectCapacityTimelineAction`)
+- Modify: `app/settings/page.tsx`
+
+This is the other calculator: not hypothetical new accounts, but "given the accounts I actually have right now, and their real ages, how many days until I can safely clear N recipients."
+
+- [ ] **Step 1: Write the failing tests**
+
+```typescript
+// append to tests/send-planner.test.ts
+import { projectAccountCapacityTimeline } from "@/services/send-planner";
+
+describe("projectAccountCapacityTimeline", () => {
+  it("grows daily capacity as an account ages into the next ramp bracket", () => {
+    const accounts = [{ id: "a", label: "A", ageDays: 0, dailyCapOverride: undefined, sentToday: 0, isActive: true }];
+    const projection = projectAccountCapacityTimeline(accounts, 100000, 10);
+    expect(projection.dailyCapacityByDay[0]).toBe(10); // today, age 0 -> cap 10
+    expect(projection.dailyCapacityByDay[4]).toBe(25); // 4 days from now, age 4 -> cap 25
+  });
+
+  it("reports days until enough cumulative capacity to clear the list", () => {
+    const accounts = [{ id: "a", label: "A", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: true }];
+    const projection = projectAccountCapacityTimeline(accounts, 250, 10);
+    expect(projection.daysToClear).toBe(3); // 100+100+100=300 >= 250 by the 3rd day
+  });
+
+  it("returns null when the horizon isn't long enough to clear the list", () => {
+    const accounts = [{ id: "a", label: "A", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: true }];
+    const projection = projectAccountCapacityTimeline(accounts, 100000, 5);
+    expect(projection.daysToClear).toBeNull();
+  });
+
+  it("ignores inactive accounts", () => {
+    const accounts = [
+      { id: "a", label: "A", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: false },
+      { id: "b", label: "B", ageDays: 90, dailyCapOverride: undefined, sentToday: 0, isActive: true },
+    ];
+    const projection = projectAccountCapacityTimeline(accounts, 50, 5);
+    expect(projection.dailyCapacityByDay[0]).toBe(100); // only B counted
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/send-planner.test.ts`
+Expected: FAIL — `projectAccountCapacityTimeline is not a function`
+
+- [ ] **Step 3: Implement it in `services/send-planner.ts`** (append below `buildSendPlan`)
+
+```typescript
+export interface CapacityProjection {
+  dailyCapacityByDay: number[];
+  daysToClear: number | null;
+}
+
+/**
+ * Projects each active account's daily cap forward (as it ages into higher
+ * ramp brackets) and reports how many days until cumulative capacity would
+ * clear `recipientCount`, or null if that doesn't happen within `horizonDays`.
+ */
+export function projectAccountCapacityTimeline(
+  accounts: PlannerAccount[],
+  recipientCount: number,
+  horizonDays = 90,
+): CapacityProjection {
+  const active = accounts.filter((a) => a.isActive);
+  const dailyCapacityByDay: number[] = [];
+  let cumulative = 0;
+  let daysToClear: number | null = null;
+
+  for (let day = 0; day < horizonDays; day++) {
+    const totalToday = active.reduce((sum, a) => {
+      const cap = a.dailyCapOverride ?? capForAge(a.ageDays + day);
+      return sum + cap;
+    }, 0);
+    dailyCapacityByDay.push(totalToday);
+    cumulative += totalToday;
+    if (daysToClear === null && cumulative >= recipientCount) {
+      daysToClear = day + 1;
+    }
+  }
+
+  return { dailyCapacityByDay, daysToClear };
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/send-planner.test.ts`
+Expected: PASS — 13 tests total in this file.
+
+- [ ] **Step 5: Add the server action**
+
+```typescript
+// in actions/campaign-actions.ts
+import { projectAccountCapacityTimeline } from "@/services/send-planner";
+
+const capacityTimelineSchema = z.object({ recipientCount: z.number().int().min(1) });
+
+export async function projectCapacityTimelineAction(input: z.infer<typeof capacityTimelineSchema>) {
+  const session = await requireSession();
+  const { recipientCount } = capacityTimelineSchema.parse(input);
+  const accounts = (await listSmtpAccounts(session.user.id)).map(toPlannerAccount);
+  return projectAccountCapacityTimeline(accounts, recipientCount);
+}
+```
+
+- [ ] **Step 6: Build the panel**
+
+```typescript
+"use client";
+
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { projectCapacityTimelineAction } from "@/actions/campaign-actions";
+import type { CapacityProjection } from "@/services/send-planner";
+
+export function CapacityTimelinePanel() {
+  const [recipientCount, setRecipientCount] = useState("");
+  const [projection, setProjection] = useState<CapacityProjection | null>(null);
+
+  async function handleCalculate() {
+    const n = Number(recipientCount);
+    if (!n || n < 1) return;
+    setProjection(await projectCapacityTimelineAction({ recipientCount: n }));
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-zinc-500">
+        Using your actual connected accounts and their real ages: how long until you could safely
+        clear a list of this size?
+      </p>
+      <div className="flex gap-2">
+        <Input
+          placeholder="Recipient count"
+          value={recipientCount}
+          onChange={(e) => setRecipientCount(e.target.value)}
+        />
+        <Button size="sm" onClick={handleCalculate}>
+          Calculate
+        </Button>
+      </div>
+      {projection && (
+        <p className="text-sm text-zinc-300">
+          {projection.daysToClear
+            ? `You could clear this in ~${projection.daysToClear} days with your current accounts.`
+            : "This exceeds what your current accounts can safely clear within 90 days — connect more accounts or reduce the list."}
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 7: Render both new panels in `app/settings/page.tsx`**, typecheck, and commit
+
+Run: `npx tsc --noEmit && npx vitest run`
+```bash
+git add -A
+git commit -m "Add capacity timeline projection using real connected account ages"
+```
+
+---
+
 ## Open questions to resolve with the user before/while executing
 
 1. **Multi-day auto-resume**: Task 9 Step 2 needs *something* to hit `/api/campaigns/resume-scheduled` once a day for a spread-out campaign to finish on its own. Options: a `send_later`/Routine-style daily ping (if this environment supports it), or just accept that revisiting the app each day is what resumes it. Confirm which before building it.
-2. **Exact cap numbers** (`new`=15, `warming`=40, `established`=100) are defaults based on common cold-outreach guidance, not a guaranteed-safe number from Google — confirm these feel right, or provide preferred numbers.
+2. **The ramp schedule** (day 0→10/day, day 4→25, day 15→50, day 30→75, day 60→100) is a default heuristic from common cold-outreach warm-up guidance, not a guaranteed-safe curve from Google — confirm it feels right, or provide preferred numbers/breakpoints.
+3. **Task 12's WHOIS dependency** adds a new package and outbound non-HTTPS network calls to third-party registrars — explicitly confirm you want this before it's built, since it's the one piece of this plan that reaches outside your own infrastructure.
+4. **Mailboxes-per-domain guideline** (default 4, used by Task 11's domain count) is a rough rule of thumb, not a hard rule from any provider — adjust if you have a different number in mind.
 3. **SPF/DKIM/DMARC confirmation flag** was mentioned as a brainstorm idea but isn't in this plan's tasks — worth a follow-up task once the core multi-account/planner flow is working, since it's a UI+copy addition rather than new architecture.
