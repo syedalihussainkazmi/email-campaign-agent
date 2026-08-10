@@ -42,6 +42,14 @@ This plan covers four subsystems that depend on each other in sequence (auth cle
 | `server/campaign-runner.ts` | Sends only recipients whose `scheduledFor <= today`, using each recipient's assigned `SmtpAccount`; increments that account's `sentToday`. |
 | `services/email-sender.ts` | `getEmailSenderForAccount(smtpAccountId)` replaces `getEmailSenderForUser(userId)`. |
 | `app/settings/page.tsx` | Gmail card removed; renders `smtp-account-list`. |
+| `services/imap-service.ts` | New. Connects to an account's inbox via IMAP, fetches messages received since a given time. |
+| `services/bounce-detector.ts` | New. Pure function: classifies a parsed inbound message as a bounce (or not) and extracts the failed recipient address. |
+| `services/reply-detector.ts` | New. Pure function: matches an inbound message to an outstanding sent recipient via `In-Reply-To`/`References` threading, with an address-match fallback. |
+| `server/inbox-poller.ts` | New. Polls every IMAP-configured account, runs bounce + reply detection, updates `CampaignRecipient` rows. |
+| `app/api/campaigns/poll-inbox/route.ts` | New. External trigger endpoint for the poller (needs a periodic ping, same as the multi-day resume endpoint). |
+| `app/api/track/open/[trackingId]/route.ts` | New (optional). 1x1 pixel endpoint, records `openedAt`. |
+| `app/api/track/click/[trackingId]/route.ts` | New (optional). Redirect-through endpoint, records `firstClickedAt`/`clickCount`. |
+| `utils/link-tracking.ts` | New (optional). Rewrites `<a href>`s in an HTML body to route through the click-tracking endpoint. |
 | `app/page.tsx` | Gmail button + dev-login button removed; only the webmail form remains (no longer collapsible — it's the only option). |
 
 ---
@@ -1906,10 +1914,678 @@ git commit -m "Add capacity timeline projection using real connected account age
 
 ---
 
+### Task 14: IMAP infrastructure + bounce detection
+
+**Files:**
+- Modify: `prisma/schema.prisma` (IMAP fields on `SmtpAccount`; `bouncedAt`/`bounceReason`/`sentMessageId` on `CampaignRecipient`)
+- Modify: `services/smtp-service.ts` (IMAP fields in CRUD)
+- Modify: `components/campaign/smtp-account-form.tsx` (IMAP host/port fields)
+- Modify: `services/smtp-sender.ts` (return the `messageId` nodemailer generates)
+- Modify: `server/campaign-runner.ts` (store `sentMessageId`)
+- Create: `services/imap-service.ts`
+- Create: `services/bounce-detector.ts`
+- Test: `tests/bounce-detector.test.ts`
+- Create: `server/inbox-poller.ts`
+- Create: `app/api/campaigns/poll-inbox/route.ts`
+
+**Bounces arrive as a plain email to your own inbox** — reading them requires IMAP (read access), a different protocol from SMTP (send-only), so every account needs IMAP credentials too. Most webmail providers use the same username/password for both, just a different port (587/465 for SMTP, 993 for IMAP) — defaulting IMAP host to the same host as SMTP is a reasonable starting guess, overridable.
+
+- [ ] **Step 1: Add IMAP fields to `SmtpAccount`, and outcome-tracking fields to `CampaignRecipient`**
+
+```prisma
+model SmtpAccount {
+  // ...existing fields from Task 2...
+  imapHost          String?
+  imapPort          Int      @default(993)
+  imapSecure        Boolean  @default(true)
+  lastInboxCheckAt  DateTime?
+}
+
+model CampaignRecipient {
+  // ...existing fields from Tasks 2/7...
+  sentMessageId String?
+  bouncedAt     DateTime?
+  bounceReason  String?
+  repliedAt     DateTime?
+}
+
+model Campaign {
+  // ...existing fields...
+  bouncedCount Int @default(0)
+  repliedCount Int @default(0)
+}
+```
+
+- [ ] **Step 2: Run the migration**
+
+Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_imap_and_outcome_tracking`
+
+- [ ] **Step 3: Install IMAP + mail-parsing libraries**
+
+Run: `cd /home/user/email-campaign-agent && npm install imapflow mailparser && npm install -D @types/mailparser`
+
+- [ ] **Step 4: Write the failing bounce-detector tests**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { detectBounce } from "@/services/bounce-detector";
+
+describe("detectBounce", () => {
+  it("recognizes a standard DSN-format bounce and extracts the failed recipient", () => {
+    const result = detectBounce({
+      from: "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+      subject: "Delivery Status Notification (Failure)",
+      bodyText:
+        "Delivery to the following recipient failed permanently:\n\n" +
+        "john@doesnotexist.acme.com\n\n" +
+        "Final-Recipient: rfc822; john@doesnotexist.acme.com\n" +
+        "Action: failed\n" +
+        "Status: 5.1.1",
+    });
+    expect(result.isBounce).toBe(true);
+    expect(result.failedRecipient).toBe("john@doesnotexist.acme.com");
+  });
+
+  it("recognizes a 'returned to sender' style bounce", () => {
+    const result = detectBounce({
+      from: "postmaster@example.com",
+      subject: "Undelivered Mail Returned to Sender",
+      bodyText: "The original message was received...\n\nFinal-Recipient: rfc822; jane@bad-domain.test",
+    });
+    expect(result.isBounce).toBe(true);
+    expect(result.failedRecipient).toBe("jane@bad-domain.test");
+  });
+
+  it("does not flag a normal reply as a bounce", () => {
+    const result = detectBounce({
+      from: "jim@arborclimb.com.au",
+      subject: "Re: Saw your business doesn't have a website yet",
+      bodyText: "Thanks for reaching out, yes let's talk.",
+    });
+    expect(result.isBounce).toBe(false);
+    expect(result.failedRecipient).toBeUndefined();
+  });
+
+  it("flags a bounce-like subject even without a parseable DSN body, with no recipient extracted", () => {
+    const result = detectBounce({
+      from: "mailer-daemon@somehost.com",
+      subject: "Mail delivery failed: returning message to sender",
+      bodyText: "This is a plain-text bounce with no machine-readable recipient field.",
+    });
+    expect(result.isBounce).toBe(true);
+    expect(result.failedRecipient).toBeUndefined();
+  });
+});
+```
+
+- [ ] **Step 5: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/bounce-detector.test.ts`
+Expected: FAIL — `Cannot find module '@/services/bounce-detector'`
+
+- [ ] **Step 6: Implement `services/bounce-detector.ts`**
+
+```typescript
+export interface InboundMessage {
+  from: string;
+  subject: string;
+  bodyText: string;
+}
+
+export interface BounceResult {
+  isBounce: boolean;
+  failedRecipient?: string;
+}
+
+const BOUNCE_SENDER_PATTERN = /mailer-daemon|postmaster|mail delivery subsystem/i;
+const BOUNCE_SUBJECT_PATTERN =
+  /undelivered|delivery status notification|delivery failed|returned to sender|failure notice/i;
+const FINAL_RECIPIENT_PATTERN = /final-recipient:\s*rfc822;\s*([^\s,]+@[^\s,]+)/i;
+
+/**
+ * Classifies an inbound message as a bounce notification (or not) and, when
+ * the body follows the standard DSN format (RFC 3464's Final-Recipient
+ * field), extracts the address that actually failed. Many real-world
+ * bounces aren't in strict DSN format, in which case isBounce is still
+ * true (the sender/subject pattern is a strong enough signal on its own)
+ * but failedRecipient is left undefined rather than guessed at.
+ */
+export function detectBounce(message: InboundMessage): BounceResult {
+  const looksLikeBounce =
+    BOUNCE_SENDER_PATTERN.test(message.from) || BOUNCE_SUBJECT_PATTERN.test(message.subject);
+
+  if (!looksLikeBounce) {
+    return { isBounce: false };
+  }
+
+  const match = message.bodyText.match(FINAL_RECIPIENT_PATTERN);
+  return { isBounce: true, failedRecipient: match?.[1] };
+}
+```
+
+- [ ] **Step 7: Run to verify it passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/bounce-detector.test.ts`
+Expected: PASS — 4 tests.
+
+- [ ] **Step 8: Capture and store `sentMessageId` when sending**
+
+In `services/smtp-sender.ts`, extend the return type and capture nodemailer's real `messageId`:
+```typescript
+export interface SendResult {
+  success: boolean;
+  error?: string;
+  messageId?: string;
+}
+// ...
+async send(_userId: string, message: OutgoingEmail): Promise<SendResult> {
+  try {
+    const transporter = nodemailer.createTransport({ /* ...unchanged... */ });
+    const info = await transporter.sendMail({ /* ...unchanged... */ });
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Unknown SMTP error" };
+  }
+}
+```
+
+In `server/campaign-runner.ts`, store it on the successful-send update:
+```typescript
+await prisma.campaignRecipient.update({
+  where: { id: next.id },
+  data: {
+    status: result.success ? "sent" : "failed",
+    sentAt: new Date(),
+    error: result.error,
+    sentMessageId: result.messageId,
+  },
+});
+```
+
+- [ ] **Step 9: Build `services/imap-service.ts`**
+
+```typescript
+import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
+
+export interface FetchedMessage {
+  from: string;
+  subject: string;
+  bodyText: string;
+  references: string[];
+  inReplyTo: string | null;
+}
+
+/**
+ * Connects to an account's inbox and returns every message received since
+ * `since`. Opens and closes the connection per call — this runs on a slow
+ * poll cadence (every few minutes at most), not per-recipient, so
+ * connection reuse isn't worth the complexity here.
+ */
+export async function fetchMessagesSince(
+  config: { host: string; port: number; secure: boolean; username: string; password: string },
+  since: Date,
+): Promise<FetchedMessage[]> {
+  const client = new ImapFlow({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: { user: config.username, pass: config.password },
+    logger: false,
+  });
+
+  const messages: FetchedMessage[] = [];
+
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      for await (const message of client.fetch({ since }, { source: true })) {
+        if (!message.source) continue;
+        const parsed = await simpleParser(message.source);
+        messages.push({
+          from: parsed.from?.text ?? "",
+          subject: parsed.subject ?? "",
+          bodyText: parsed.text ?? "",
+          references: Array.isArray(parsed.references)
+            ? parsed.references
+            : parsed.references
+              ? [parsed.references]
+              : [],
+          inReplyTo: parsed.inReplyTo ?? null,
+        });
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
+
+  return messages;
+}
+```
+
+- [ ] **Step 10: Build `server/inbox-poller.ts`**
+
+```typescript
+import { prisma } from "@/database/prisma";
+import { fetchMessagesSince } from "@/services/imap-service";
+import { detectBounce } from "@/services/bounce-detector";
+import { detectReply } from "@/services/reply-detector";
+import { getSmtpAccountWithPassword } from "@/services/smtp-service";
+
+/**
+ * Polls every IMAP-configured account for new inbox messages since its last
+ * check, classifies each as a bounce or reply, and updates the matching
+ * CampaignRecipient row. Meant to be triggered periodically by an external
+ * ping (see app/api/campaigns/poll-inbox/route.ts) — same constraint as the
+ * multi-day campaign resume in Task 9.
+ */
+export async function pollAllInboxes(): Promise<{ checked: number; bounces: number; replies: number }> {
+  const accounts = await prisma.smtpAccount.findMany({
+    where: { imapHost: { not: null }, isActive: true },
+  });
+
+  let bounces = 0;
+  let replies = 0;
+
+  for (const account of accounts) {
+    const full = await getSmtpAccountWithPassword(account.id, account.userId);
+    if (!full || !full.imapHost) continue;
+
+    const since = account.lastInboxCheckAt ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const messages = await fetchMessagesSince(
+      {
+        host: full.imapHost,
+        port: full.imapPort,
+        secure: full.imapSecure,
+        username: full.username,
+        password: full.password,
+      },
+      since,
+    );
+
+    for (const message of messages) {
+      const bounce = detectBounce(message);
+      if (bounce.isBounce && bounce.failedRecipient) {
+        const matches = await prisma.campaignRecipient.findMany({
+          where: {
+            smtpAccountId: account.id,
+            status: "sent",
+            bouncedAt: null,
+            recipient: { email: bounce.failedRecipient },
+          },
+          select: { id: true, campaignId: true },
+        });
+
+        for (const match of matches) {
+          await prisma.campaignRecipient.update({
+            where: { id: match.id },
+            data: { bouncedAt: new Date(), bounceReason: "Bounced (detected via inbox scan)" },
+          });
+          await prisma.campaign.update({
+            where: { id: match.campaignId },
+            data: { bouncedCount: { increment: 1 } },
+          });
+          bounces++;
+        }
+        continue;
+      }
+
+      const outstanding = await prisma.campaignRecipient.findMany({
+        where: { smtpAccountId: account.id, status: "sent", sentMessageId: { not: null } },
+        select: { id: true, sentMessageId: true, campaignId: true },
+      });
+      const reply = detectReply(message, outstanding);
+      if (reply.matchedRecipientId) {
+        const matched = outstanding.find((r) => r.id === reply.matchedRecipientId)!;
+        await prisma.campaignRecipient.update({
+          where: { id: matched.id },
+          data: { repliedAt: new Date() },
+        });
+        await prisma.campaign.update({
+          where: { id: matched.campaignId },
+          data: { repliedCount: { increment: 1 } },
+        });
+        replies++;
+      }
+    }
+
+    await prisma.smtpAccount.update({
+      where: { id: account.id },
+      data: { lastInboxCheckAt: new Date() },
+    });
+  }
+
+  return { checked: accounts.length, bounces, replies };
+}
+```
+
+- [ ] **Step 11: Add the trigger route**
+
+```typescript
+// app/api/campaigns/poll-inbox/route.ts
+import { NextResponse } from "next/server";
+import { pollAllInboxes } from "@/server/inbox-poller";
+
+export async function GET() {
+  const result = await pollAllInboxes();
+  return NextResponse.json(result);
+}
+```
+
+- [ ] **Step 12: Thread IMAP fields through the account CRUD and form**
+
+In `services/smtp-service.ts`, extend `SmtpAccountInput`/`SmtpAccountRecord` and the create/list functions:
+```typescript
+export interface SmtpAccountInput {
+  // ...existing fields from Task 2...
+  imapHost: string;
+  imapPort: number;
+  imapSecure: boolean;
+}
+
+export interface SmtpAccountRecord extends Omit<SmtpAccountInput, "password"> {
+  // ...existing fields from Task 2...
+}
+
+// in listSmtpAccounts, add to the pushed record:
+imapHost: row.imapHost,
+imapPort: row.imapPort,
+imapSecure: row.imapSecure,
+
+// in createSmtpAccount's data object, add:
+imapHost: input.imapHost,
+imapPort: input.imapPort,
+imapSecure: input.imapSecure,
+```
+
+In `actions/settings-actions.ts`, extend `smtpAccountSchema`:
+```typescript
+const smtpAccountSchema = z.object({
+  // ...existing fields from Task 3...
+  imapHost: z.string().min(1),
+  imapPort: z.coerce.number().int().min(1).max(65535).default(993),
+  imapSecure: z.boolean().default(true),
+});
+```
+
+In `components/campaign/smtp-account-form.tsx`, add the fields (defaulting `imapHost` to whatever's typed into `host` unless the user overrides it):
+```typescript
+const [imapHost, setImapHost] = useState("");
+const [imapPort, setImapPort] = useState("993");
+const [imapSecure, setImapSecure] = useState(true);
+// ...
+async function handleSave() {
+  // ...
+  const result = await addSmtpAccountAction({
+    // ...existing fields...
+    imapHost: imapHost || host,
+    imapPort: Number(imapPort),
+    imapSecure,
+  });
+  // ...
+}
+// ... in the JSX, below the existing SMTP host/port inputs:
+<Input
+  placeholder="IMAP host (blank = same as SMTP host)"
+  value={imapHost}
+  onChange={(e) => setImapHost(e.target.value)}
+/>
+<Input placeholder="IMAP port (993)" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
+```
+
+- [ ] **Step 13: Typecheck, test, commit**
+
+Run: `npx tsc --noEmit && npx vitest run`
+```bash
+git add -A
+git commit -m "Add IMAP-based bounce detection"
+```
+
+---
+
+### Task 15: Reply detection
+
+**Files:**
+- Create: `services/reply-detector.ts`
+- Test: `tests/reply-detector.test.ts`
+
+(`server/inbox-poller.ts` from Task 14 already calls `detectReply` — this task fills that module in.)
+
+- [ ] **Step 1: Write the failing tests**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { detectReply } from "@/services/reply-detector";
+
+describe("detectReply", () => {
+  it("matches a reply via References header against an outstanding sentMessageId", () => {
+    const outstanding = [
+      { id: "cr1", sentMessageId: "<abc123@mailpilot>" },
+      { id: "cr2", sentMessageId: "<def456@mailpilot>" },
+    ];
+    const message = {
+      from: "jim@arborclimb.com.au",
+      subject: "Re: quick question",
+      bodyText: "Sure, let's talk.",
+      references: ["<abc123@mailpilot>"],
+      inReplyTo: null,
+    };
+    expect(detectReply(message, outstanding).matchedRecipientId).toBe("cr1");
+  });
+
+  it("matches via In-Reply-To when References is absent", () => {
+    const outstanding = [{ id: "cr1", sentMessageId: "<abc123@mailpilot>" }];
+    const message = {
+      from: "jim@arborclimb.com.au",
+      subject: "Re: quick question",
+      bodyText: "Sure.",
+      references: [],
+      inReplyTo: "<abc123@mailpilot>",
+    };
+    expect(detectReply(message, outstanding).matchedRecipientId).toBe("cr1");
+  });
+
+  it("returns no match when neither header lines up with anything outstanding", () => {
+    const outstanding = [{ id: "cr1", sentMessageId: "<abc123@mailpilot>" }];
+    const message = {
+      from: "someone@else.com",
+      subject: "Unrelated",
+      bodyText: "Hi",
+      references: ["<unrelated@somewhere>"],
+      inReplyTo: null,
+    };
+    expect(detectReply(message, outstanding).matchedRecipientId).toBeUndefined();
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/reply-detector.test.ts`
+Expected: FAIL — `Cannot find module '@/services/reply-detector'`
+
+- [ ] **Step 3: Implement `services/reply-detector.ts`**
+
+```typescript
+import type { FetchedMessage } from "@/services/imap-service";
+
+export interface OutstandingRecipient {
+  id: string;
+  sentMessageId: string | null;
+}
+
+export interface ReplyResult {
+  matchedRecipientId?: string;
+}
+
+/**
+ * Matches an inbound message back to the campaign send it's replying to,
+ * via email threading headers (References, then In-Reply-To) against each
+ * outstanding recipient's stored sentMessageId. Threading-header matching
+ * is used rather than "any inbound mail from that address counts as a
+ * reply", since a lead might separately email you about something
+ * unrelated — this only counts a genuine reply to the actual sent message.
+ */
+export function detectReply(message: FetchedMessage, outstanding: OutstandingRecipient[]): ReplyResult {
+  const candidateIds = new Set([...message.references, message.inReplyTo].filter(Boolean) as string[]);
+
+  for (const recipient of outstanding) {
+    if (recipient.sentMessageId && candidateIds.has(recipient.sentMessageId)) {
+      return { matchedRecipientId: recipient.id };
+    }
+  }
+
+  return {};
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd /home/user/email-campaign-agent && npx vitest run tests/reply-detector.test.ts`
+Expected: PASS — 3 tests.
+
+- [ ] **Step 5: Surface bounce/reply counts on `app/history/page.tsx`**
+
+This page renders one `Card` per campaign with a row of `Total`/`Delivered`/`Failed` counts inside `CardContent`. Add `Bounced`/`Replied` to that same row, reading the new `bouncedCount`/`repliedCount` fields from Task 14 Step 1:
+
+```typescript
+<CardContent className="flex gap-6 text-xs text-zinc-400">
+  <span>Total: {c.totalCount}</span>
+  <span>Delivered: {c.deliveredCount}</span>
+  <span>Failed: {c.failedCount}</span>
+  <span>Bounced: {c.bouncedCount}</span>
+  <span>Replied: {c.repliedCount}</span>
+</CardContent>
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A
+git commit -m "Add reply detection via email threading headers"
+```
+
+---
+
+### Task 16 (optional, lower-confidence signal): Open and click tracking
+
+**⚠ Read this before building it**: open tracking via pixel is industry-acknowledged as unreliable — Apple Mail Privacy Protection preloads every tracking pixel for every email regardless of whether a human opened it (massively overcounts), while many other clients block external images by default (undercounts everyone else). Click tracking is far more trustworthy, since it only fires on an actual, deliberate click. Confirm you still want pixel-based open tracking despite the caveat, or consider shipping click tracking alone.
+
+**Files:**
+- Modify: `prisma/schema.prisma` (`trackingId`, `openedAt`, `firstClickedAt`, `clickCount` on `CampaignRecipient`)
+- Create: `utils/link-tracking.ts`
+- Create: `app/api/track/open/[trackingId]/route.ts`
+- Create: `app/api/track/click/[trackingId]/route.ts`
+- Modify: `server/campaign-runner.ts` (inject the pixel + rewrite links before sending)
+
+- [ ] **Step 1: Add tracking fields**
+
+```prisma
+model CampaignRecipient {
+  // ...existing fields...
+  trackingId      String   @unique @default(cuid())
+  openedAt        DateTime?
+  firstClickedAt  DateTime?
+  clickCount      Int       @default(0)
+}
+```
+
+Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_open_click_tracking`
+
+- [ ] **Step 2: Build `utils/link-tracking.ts`**
+
+```typescript
+const ANCHOR_HREF_PATTERN = /<a\s+([^>]*?)href="([^"]+)"([^>]*)>/gi;
+
+/** Rewrites every <a href="..."> in HTML to route through the click-tracking redirect endpoint. */
+export function rewriteLinksForTracking(html: string, trackingId: string, baseUrl: string): string {
+  return html.replace(ANCHOR_HREF_PATTERN, (match, before, href, after) => {
+    if (href.startsWith("mailto:") || href.startsWith("#")) return match;
+    const trackedUrl = `${baseUrl}/api/track/click/${trackingId}?url=${encodeURIComponent(href)}`;
+    return `<a ${before}href="${trackedUrl}"${after}>`;
+  });
+}
+
+/** The invisible 1x1 pixel tag appended before the signature. */
+export function openTrackingPixel(trackingId: string, baseUrl: string): string {
+  return `<img src="${baseUrl}/api/track/open/${trackingId}" width="1" height="1" style="display:none" alt="" />`;
+}
+```
+
+- [ ] **Step 3: Wire it into the send loop**
+
+In `server/campaign-runner.ts`, after rendering `bodyHtml` and appending the signature, before calling `sender.send(...)`:
+```typescript
+const trackedHtml =
+  rewriteLinksForTracking(renderTemplate(campaign.bodyHtml, variables), next.trackingId, process.env.APP_BASE_URL!) +
+  signatureHtml +
+  openTrackingPixel(next.trackingId, process.env.APP_BASE_URL!);
+```
+Use `trackedHtml` as the `bodyHtml` passed to `sender.send`. Requires an `APP_BASE_URL` env var set to your public URL (the Cloudflare Tunnel domain or wherever this is actually reachable) — tracking links are meaningless if they don't point somewhere the recipient's email client can actually reach.
+
+- [ ] **Step 4: Add the tracking routes**
+
+```typescript
+// app/api/track/open/[trackingId]/route.ts
+import { prisma } from "@/database/prisma";
+
+const PIXEL = Buffer.from(
+  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7",
+  "base64",
+);
+
+export async function GET(_req: Request, { params }: { params: Promise<{ trackingId: string }> }) {
+  const { trackingId } = await params;
+  await prisma.campaignRecipient.updateMany({
+    where: { trackingId, openedAt: null },
+    data: { openedAt: new Date() },
+  });
+  return new Response(PIXEL, { headers: { "Content-Type": "image/gif" } });
+}
+```
+
+```typescript
+// app/api/track/click/[trackingId]/route.ts
+import { NextResponse } from "next/server";
+import { prisma } from "@/database/prisma";
+
+export async function GET(req: Request, { params }: { params: Promise<{ trackingId: string }> }) {
+  const { trackingId } = await params;
+  const url = new URL(req.url).searchParams.get("url");
+  if (!url) return NextResponse.json({ error: "Missing url" }, { status: 400 });
+
+  const recipient = await prisma.campaignRecipient.findUnique({ where: { trackingId } });
+  await prisma.campaignRecipient.update({
+    where: { trackingId },
+    data: {
+      firstClickedAt: recipient?.firstClickedAt ?? new Date(),
+      clickCount: { increment: 1 },
+    },
+  });
+
+  return NextResponse.redirect(url);
+}
+```
+
+- [ ] **Step 5: Show open/click counts in the campaign detail view**, typecheck, and commit
+
+Run: `npx tsc --noEmit`
+```bash
+git add -A
+git commit -m "Add optional open/click tracking (click tracking is the reliable one)"
+```
+
+---
+
 ## Open questions to resolve with the user before/while executing
 
-1. **Multi-day auto-resume**: Task 9 Step 2 needs *something* to hit `/api/campaigns/resume-scheduled` once a day for a spread-out campaign to finish on its own. Options: a `send_later`/Routine-style daily ping (if this environment supports it), or just accept that revisiting the app each day is what resumes it. Confirm which before building it.
+1. **Multi-day auto-resume** (Task 9) and **inbox polling** (Task 14) both need *something* to ping their respective endpoints periodically — a `send_later`/Routine-style recurring job (if this environment supports it), or accept that revisiting the app is what triggers them. These two could reasonably share a single "daily maintenance" cron ping. Confirm which approach before building.
 2. **The ramp schedule** (day 0→10/day, day 4→25, day 15→50, day 30→75, day 60→100) is a default heuristic from common cold-outreach warm-up guidance, not a guaranteed-safe curve from Google — confirm it feels right, or provide preferred numbers/breakpoints.
 3. **Task 12's WHOIS dependency** adds a new package and outbound non-HTTPS network calls to third-party registrars — explicitly confirm you want this before it's built, since it's the one piece of this plan that reaches outside your own infrastructure.
 4. **Mailboxes-per-domain guideline** (default 4, used by Task 11's domain count) is a rough rule of thumb, not a hard rule from any provider — adjust if you have a different number in mind.
-3. **SPF/DKIM/DMARC confirmation flag** was mentioned as a brainstorm idea but isn't in this plan's tasks — worth a follow-up task once the core multi-account/planner flow is working, since it's a UI+copy addition rather than new architecture.
+5. **SPF/DKIM/DMARC live DNS check** was flagged as a strong follow-up candidate (more reliable than WHOIS domain age, since DNS TXT records are deterministic and unambiguous) but isn't in this plan's tasks yet — worth adding as Task 17 once the core flow works, if you want it.
+6. **Task 16 (open/click tracking)** — confirm you still want pixel-based open tracking given its acknowledged unreliability, or whether click tracking alone is enough.
+7. **`APP_BASE_URL`** (Task 16) needs to be a real, publicly reachable URL for tracking links/pixels to work at all — ties back to the earlier hosting/tunnel decision.
