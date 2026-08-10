@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { prisma } from "@/database/prisma";
 import { createDatabaseSession } from "@/auth/session-cookie";
-import { setSmtpConfig } from "@/services/smtp-service";
+import { createSmtpAccount } from "@/services/smtp-service";
 import { verifySmtpConfig } from "@/services/smtp-sender";
 import { isRateLimited } from "@/server/rate-limiter";
 
@@ -53,7 +53,17 @@ export async function webmailSignInAction(
     create: { email: parsed.email.toLowerCase() },
   });
 
-  await setSmtpConfig(user.id, config);
+  // Backdate the very first account's age by 90 days: it's presumably an
+  // existing mailbox they already use to sign in, not a throwaway new one -
+  // they can correct this to the real age later in Settings.
+  const assumedMailboxAge = new Date();
+  assumedMailboxAge.setDate(assumedMailboxAge.getDate() - 90);
+
+  await createSmtpAccount(user.id, {
+    label: "Primary",
+    ...config,
+    mailboxAgeStartDate: assumedMailboxAge,
+  });
   await createDatabaseSession(user.id);
 
   return { ok: true };
