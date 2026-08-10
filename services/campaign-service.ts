@@ -1,5 +1,6 @@
 import { prisma } from "@/database/prisma";
 import { dedupeRecipients, type ParsedRecipient } from "@/services/recipient-service";
+import { findUnsubscribedEmails } from "@/services/unsubscribe-service";
 
 export interface CreateCampaignInput {
   userId: string;
@@ -27,9 +28,15 @@ export interface CreateCampaignInput {
  * sentToday's rollover.
  */
 export async function createCampaign(input: CreateCampaignInput) {
-  const recipients = dedupeRecipients(input.recipients);
+  const deduped = dedupeRecipients(input.recipients);
+  const unsubscribed = await findUnsubscribedEmails(
+    input.userId,
+    deduped.map((r) => r.email),
+  );
+  const recipients = deduped.filter((r) => !unsubscribed.has(r.email));
+  const skippedUnsubscribed = deduped.filter((r) => unsubscribed.has(r.email)).map((r) => r.email);
 
-  return prisma.$transaction(async (tx) => {
+  const campaign = await prisma.$transaction(async (tx) => {
     const campaign = await tx.campaign.create({
       data: {
         userId: input.userId,
@@ -75,6 +82,8 @@ export async function createCampaign(input: CreateCampaignInput) {
 
     return campaign;
   });
+
+  return { campaign, skippedUnsubscribed };
 }
 
 export async function listCampaigns(userId: string, page = 1, pageSize = 20) {

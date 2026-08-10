@@ -30,6 +30,7 @@ export class SmtpEmailSender implements EmailSenderPort {
         subject: message.subject,
         html: message.bodyHtml,
         text: message.bodyText,
+        headers: message.headers,
       });
 
       return { success: true, messageId: info.messageId };

@@ -6,6 +6,7 @@ export interface OutgoingEmail {
   subject: string;
   bodyHtml: string;
   bodyText?: string;
+  headers?: Record<string, string>;
 }
 
 export interface SendResult {

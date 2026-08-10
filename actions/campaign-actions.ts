@@ -42,7 +42,7 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
   const selectedAccounts = allAccounts.filter((a) => parsed.accountIds.includes(a.id)).map(toPlannerAccount);
   const plan = buildSendPlan(parsed.recipients.length, selectedAccounts, { hasPersonalization });
 
-  const campaign = await createCampaign({
+  const { campaign, skippedUnsubscribed } = await createCampaign({
     userId: session.user.id,
     subject: parsed.subject,
     bodyHtml: parsed.bodyHtml,
@@ -55,7 +55,7 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
 
   void startCampaignRunner(campaign.id);
 
-  return { campaignId: campaign.id };
+  return { campaignId: campaign.id, skippedUnsubscribed };
 }
 
 export async function listAccountsForPlanningAction() {

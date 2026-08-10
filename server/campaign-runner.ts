@@ -6,6 +6,7 @@ import { randomDelaySeconds, sleep } from "@/utils/delay";
 import { renderTemplate } from "@/utils/template";
 import { looksLikeHtml, stripHtml } from "@/utils/html";
 import { rewriteLinksForTracking } from "@/utils/link-tracking";
+import { buildUnsubscribeHeaders } from "@/services/unsubscribe-service";
 
 const activeRunners = new Set<string>();
 
@@ -90,8 +91,17 @@ export async function startCampaignRunner(campaignId: string) {
         continue;
       }
 
-      const sender = await getEmailSenderForAccount(next.smtpAccountId, campaign.userId);
       const recipient = await prisma.recipient.findUniqueOrThrow({ where: { id: next.recipientId } });
+
+      if (recipient.unsubscribedAt) {
+        await prisma.campaignRecipient.update({
+          where: { id: next.id },
+          data: { status: "failed", error: "Recipient unsubscribed" },
+        });
+        continue;
+      }
+
+      const sender = await getEmailSenderForAccount(next.smtpAccountId, campaign.userId);
       const variables = { businessName: next.name, ownerName: next.ownerName };
 
       const renderedHtml = renderTemplate(campaign.bodyHtml, variables) + signatureHtml;
@@ -99,13 +109,19 @@ export async function startCampaignRunner(campaignId: string) {
         ? rewriteLinksForTracking(renderedHtml, next.trackingId, process.env.APP_BASE_URL)
         : renderedHtml;
 
+      const unsubscribeUrl = `${process.env.APP_BASE_URL}/api/unsubscribe/${recipient.unsubscribeToken}`;
+      const unsubscribeFooter =
+        `<br/><br/><p style="font-size:11px;color:#888">Don't want these emails? ` +
+        `<a href="${unsubscribeUrl}">Unsubscribe</a></p>`;
+
       const result = await sender.send(campaign.userId, {
         to: recipient.email,
         subject: renderTemplate(campaign.subject, variables),
-        bodyHtml: trackedHtml,
+        bodyHtml: trackedHtml + unsubscribeFooter,
         bodyText: campaign.bodyText
-          ? renderTemplate(campaign.bodyText, variables) + signatureText
+          ? renderTemplate(campaign.bodyText, variables) + signatureText + `\n\nUnsubscribe: ${unsubscribeUrl}`
           : undefined,
+        headers: buildUnsubscribeHeaders(unsubscribeUrl),
       });
 
       if (result.success) {

@@ -2603,7 +2603,7 @@ git commit -m "Add optional open/click tracking (click tracking is the reliable 
 - Modify: `server/campaign-runner.ts` (attaches the header + visible link to every send; defensively skips if unsubscribed after the campaign was created)
 - Modify: `actions/campaign-actions.ts` (surface `skippedUnsubscribed` count to the caller)
 
-- [ ] **Step 1: Add the fields**
+- [x] **Step 1: Add the fields**
 
 ```prisma
 model Recipient {
@@ -2615,7 +2615,7 @@ model Recipient {
 
 Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_unsubscribe`
 
-- [ ] **Step 2: Write the failing test for the pure header-builder**
+- [x] **Step 2: Write the failing test for the pure header-builder**
 
 ```typescript
 import { describe, it, expect } from "vitest";
@@ -2630,12 +2630,12 @@ describe("buildUnsubscribeHeaders", () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/unsubscribe-service.test.ts`
 Expected: FAIL — `Cannot find module '@/services/unsubscribe-service'`
 
-- [ ] **Step 4: Implement `services/unsubscribe-service.ts`**
+- [x] **Step 4: Implement `services/unsubscribe-service.ts`**
 
 ```typescript
 import { prisma } from "@/database/prisma";
@@ -2670,12 +2670,12 @@ export async function findUnsubscribedEmails(userId: string, emails: string[]): 
 }
 ```
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/unsubscribe-service.test.ts`
 Expected: PASS — 1 test.
 
-- [ ] **Step 6: Add the unsubscribe route**
+- [x] **Step 6: Add the unsubscribe route**
 
 ```typescript
 import { markUnsubscribed } from "@/services/unsubscribe-service";
@@ -2703,7 +2703,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
 }
 ```
 
-- [ ] **Step 7: Add `headers` to the sending pipeline**
+- [x] **Step 7: Add `headers` to the sending pipeline**
 
 In `services/email-sender.ts`:
 ```typescript
@@ -2728,7 +2728,7 @@ await transporter.sendMail({
 });
 ```
 
-- [ ] **Step 8: Filter unsubscribed recipients out of `createCampaign`**
+- [x] **Step 8: Filter unsubscribed recipients out of `createCampaign`**
 
 This replaces `createCampaign` from Task 7 Step 3 in full — only the first two lines (deduping, then filtering out unsubscribed emails) and the final return statement are new; the transaction body itself is unchanged from Task 7:
 
@@ -2796,7 +2796,7 @@ export async function createCampaign(input: CreateCampaignInput) {
 ```
 (This changes `createCampaign`'s return shape from `campaign` to `{ campaign, skippedUnsubscribed }` — update `createAndStartCampaignAction` in Step 10 below accordingly, since it's the only caller.)
 
-- [ ] **Step 9: Attach the header and visible link at send time in `server/campaign-runner.ts`**
+- [x] **Step 9: Attach the header and visible link at send time in `server/campaign-runner.ts`**
 
 Before building the `sender.send(...)` call, and after fetching `recipient` (already done in Task 9's rewrite):
 ```typescript
@@ -2824,7 +2824,7 @@ const result = await sender.send(campaign.userId, {
 });
 ```
 
-- [ ] **Step 10: Update `createAndStartCampaignAction` for the new return shape**
+- [x] **Step 10: Update `createAndStartCampaignAction` for the new return shape**
 
 ```typescript
 const { campaign, skippedUnsubscribed } = await createCampaign({
@@ -2842,7 +2842,7 @@ void startCampaignRunner(campaign.id);
 return { campaignId: campaign.id, skippedUnsubscribed };
 ```
 
-- [ ] **Step 11: Typecheck, test, commit**
+- [x] **Step 11: Typecheck, test, commit**
 
 Run: `npx tsc --noEmit && npx vitest run`
 ```bash
