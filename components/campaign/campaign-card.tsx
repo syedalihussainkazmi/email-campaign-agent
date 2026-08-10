@@ -19,6 +19,7 @@ export function CampaignCard() {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolvedAccountIds, setResolvedAccountIds] = useState<string[]>([]);
+  const [useFixedPace, setUseFixedPace] = useState(false);
   const recipients = useRecipientStore((s) => s.valid);
   const clearAll = useRecipientStore((s) => s.clearAll);
   const hasPersonalization = PERSONALIZATION_PATTERN.test(subject + body);
@@ -47,6 +48,7 @@ export function CampaignCard() {
         bodyText: body,
         recipients,
         accountIds: resolvedAccountIds,
+        useFixedPace,
       });
       setActiveCampaignId(campaignId);
       clearAll();
@@ -72,6 +74,15 @@ export function CampaignCard() {
           hasPersonalization={hasPersonalization}
           onAccountsResolved={setResolvedAccountIds}
         />
+
+        <label className="flex items-center gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={useFixedPace}
+            onChange={(e) => setUseFixedPace(e.target.checked)}
+          />
+          Send at a fixed 5-second pace instead of randomized 5-10s (daily send caps still apply)
+        </label>
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 

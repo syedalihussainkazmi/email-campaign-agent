@@ -155,7 +155,7 @@ export async function startCampaignRunner(campaignId: string) {
         }),
       ]);
 
-      const delaySeconds = randomDelaySeconds(5, 10);
+      const delaySeconds = campaign.fixedDelaySeconds ?? randomDelaySeconds(5, 10);
       await prisma.campaign.update({
         where: { id: campaignId },
         data: { avgIntervalSeconds: delaySeconds },

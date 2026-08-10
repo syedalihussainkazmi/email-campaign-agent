@@ -110,6 +110,10 @@ model Campaign {
   bouncedCount       Int            @default(0)
   repliedCount       Int            @default(0)
   avgIntervalSeconds Float?
+  // Null = randomized 5-10s gap (recommended, default). A number fixes the
+  // gap between sends instead — this only changes pacing, never the daily
+  // send caps or multi-day scheduling from the send-planner "brain".
+  fixedDelaySeconds  Int?
 
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   recipients CampaignRecipient[]

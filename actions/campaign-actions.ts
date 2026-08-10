@@ -24,6 +24,7 @@ const createCampaignSchema = z.object({
     )
     .min(1),
   accountIds: z.array(z.string()).min(1, "Select at least one email account to send from"),
+  useFixedPace: z.boolean().default(false),
 });
 
 export async function createAndStartCampaignAction(input: z.infer<typeof createCampaignSchema>) {
@@ -49,6 +50,7 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
     bodyText: parsed.bodyText,
     recipients: parsed.recipients,
     accountAllocations: plan.allocations,
+    fixedDelaySeconds: parsed.useFixedPace ? 5 : undefined,
   });
 
   await logAudit(session.user.id, "campaign.create", { type: "campaign", id: campaign.id });

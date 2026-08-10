@@ -9,6 +9,10 @@ export interface CreateCampaignInput {
   bodyText?: string;
   recipients: ParsedRecipient[];
   accountAllocations: { accountId: string; count: number }[]; // today's batch, in order
+  // Undefined/null = randomized 5-10s gap (default). A number fixes the gap
+  // between sends instead — purely a pacing choice, independent of the
+  // daily send caps and multi-day scheduling computed above.
+  fixedDelaySeconds?: number;
 }
 
 /**
@@ -44,6 +48,7 @@ export async function createCampaign(input: CreateCampaignInput) {
         bodyHtml: input.bodyHtml,
         bodyText: input.bodyText,
         totalCount: recipients.length,
+        fixedDelaySeconds: input.fixedDelaySeconds,
       },
     });
 
