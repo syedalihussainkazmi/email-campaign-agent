@@ -2488,7 +2488,7 @@ git commit -m "Add reply detection via email threading headers"
 - Create: `app/api/track/click/[trackingId]/route.ts`
 - Modify: `server/campaign-runner.ts` (inject the pixel + rewrite links before sending)
 
-- [ ] **Step 1: Add tracking fields**
+- [x] **Step 1: Add tracking fields**
 
 ```prisma
 model CampaignRecipient {
@@ -2502,7 +2502,7 @@ model CampaignRecipient {
 
 Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_open_click_tracking`
 
-- [ ] **Step 2: Build `utils/link-tracking.ts`**
+- [x] **Step 2: Build `utils/link-tracking.ts`**
 
 ```typescript
 const ANCHOR_HREF_PATTERN = /<a\s+([^>]*?)href="([^"]+)"([^>]*)>/gi;
@@ -2522,7 +2522,7 @@ export function openTrackingPixel(trackingId: string, baseUrl: string): string {
 }
 ```
 
-- [ ] **Step 3: Wire it into the send loop**
+- [x] **Step 3: Wire it into the send loop**
 
 In `server/campaign-runner.ts`, after rendering `bodyHtml` and appending the signature, before calling `sender.send(...)`:
 ```typescript
@@ -2533,7 +2533,7 @@ const trackedHtml =
 ```
 Use `trackedHtml` as the `bodyHtml` passed to `sender.send`. Requires an `APP_BASE_URL` env var set to your public URL (the Cloudflare Tunnel domain or wherever this is actually reachable) — tracking links are meaningless if they don't point somewhere the recipient's email client can actually reach.
 
-- [ ] **Step 4: Add the tracking routes**
+- [x] **Step 4: Add the tracking routes**
 
 ```typescript
 // app/api/track/open/[trackingId]/route.ts
@@ -2577,7 +2577,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ tracking
 }
 ```
 
-- [ ] **Step 5: Show open/click counts in the campaign detail view**, typecheck, and commit
+- [x] **Step 5: Show open/click counts in the campaign detail view**, typecheck, and commit
 
 Run: `npx tsc --noEmit`
 ```bash
@@ -2586,6 +2586,9 @@ git commit -m "Add optional open/click tracking (click tracking is the reliable 
 ```
 
 ---
+
+
+> **Built as click-tracking only** (user's explicit choice) — the `openedAt` pixel, `app/api/track/open/[trackingId]/route.ts`, and its injection into the send loop were intentionally skipped as unreliable. Only `trackingId`, `firstClickedAt`, `clickCount`, `utils/link-tracking.ts`, and `app/api/track/click/[trackingId]/route.ts` were built.
 
 ### Task 17: One-click unsubscribe + `List-Unsubscribe` header
 

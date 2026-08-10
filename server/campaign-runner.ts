@@ -5,6 +5,7 @@ import { getSignature } from "@/services/signature-service";
 import { randomDelaySeconds, sleep } from "@/utils/delay";
 import { renderTemplate } from "@/utils/template";
 import { looksLikeHtml, stripHtml } from "@/utils/html";
+import { rewriteLinksForTracking } from "@/utils/link-tracking";
 
 const activeRunners = new Set<string>();
 
@@ -93,10 +94,15 @@ export async function startCampaignRunner(campaignId: string) {
       const recipient = await prisma.recipient.findUniqueOrThrow({ where: { id: next.recipientId } });
       const variables = { businessName: next.name, ownerName: next.ownerName };
 
+      const renderedHtml = renderTemplate(campaign.bodyHtml, variables) + signatureHtml;
+      const trackedHtml = process.env.APP_BASE_URL
+        ? rewriteLinksForTracking(renderedHtml, next.trackingId, process.env.APP_BASE_URL)
+        : renderedHtml;
+
       const result = await sender.send(campaign.userId, {
         to: recipient.email,
         subject: renderTemplate(campaign.subject, variables),
-        bodyHtml: renderTemplate(campaign.bodyHtml, variables) + signatureHtml,
+        bodyHtml: trackedHtml,
         bodyText: campaign.bodyText
           ? renderTemplate(campaign.bodyText, variables) + signatureText
           : undefined,

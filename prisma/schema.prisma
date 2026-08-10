@@ -146,6 +146,9 @@ model CampaignRecipient {
   bouncedAt     DateTime?
   bounceReason  String?
   repliedAt     DateTime?
+  trackingId     String    @unique @default(cuid())
+  firstClickedAt DateTime?
+  clickCount     Int       @default(0)
 
   campaign    Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipient   Recipient    @relation(fields: [recipientId], references: [id], onDelete: Cascade)

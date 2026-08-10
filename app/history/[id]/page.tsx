@@ -34,6 +34,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   }
 
   const pendingCount = campaign.totalCount - campaign.sentCount;
+  const clickedCount = campaign.recipients.filter((cr) => cr.clickCount > 0).length;
 
   return (
     <AuthedShell>
@@ -57,11 +58,14 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             <Badge variant={CAMPAIGN_STATUS_VARIANT[campaign.status]}>{campaign.status}</Badge>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-7">
               <Stat label="Total Recipients" value={campaign.totalCount} />
               <Stat label="Sent" value={campaign.sentCount} />
               <Stat label="Delivered" value={campaign.deliveredCount} variant="success" />
               <Stat label="Failed" value={campaign.failedCount} variant="destructive" />
+              <Stat label="Bounced" value={campaign.bouncedCount} variant="destructive" />
+              <Stat label="Replied" value={campaign.repliedCount} variant="success" />
+              <Stat label="Clicked" value={clickedCount} variant="success" />
               <Stat label="Remaining" value={Math.max(0, pendingCount)} />
             </div>
             {campaign.avgIntervalSeconds != null && (
@@ -87,6 +91,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                     <th className="px-3 py-2">Owner</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Sent At</th>
+                    <th className="px-3 py-2">Clicks</th>
                     <th className="px-3 py-2">Error</th>
                   </tr>
                 </thead>
@@ -102,6 +107,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                       <td className="px-3 py-2 text-zinc-500">
                         {cr.sentAt ? cr.sentAt.toLocaleString() : "—"}
                       </td>
+                      <td className="px-3 py-2 text-zinc-400">{cr.clickCount || "—"}</td>
                       <td className="px-3 py-2 text-red-400">{cr.error || "—"}</td>
                     </tr>
                   ))}
