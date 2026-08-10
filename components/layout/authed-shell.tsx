@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/auth/auth";
+import { auth } from "@/auth/session";
 import { TopNav } from "@/components/layout/top-nav";
 
 /** Wraps a page in the standard signed-in shell, redirecting to the landing page if unauthenticated. */

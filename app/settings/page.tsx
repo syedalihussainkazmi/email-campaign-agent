@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
-import { auth, getDecryptedGoogleAccount } from "@/auth/auth";
+import { auth } from "@/auth/session";
 import { AuthedShell } from "@/components/layout/authed-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { SignatureForm } from "@/components/campaign/signature-form";
 import { SmtpForm } from "@/components/campaign/smtp-form";
 import { getSignature } from "@/services/signature-service";
@@ -14,8 +13,7 @@ export default async function SettingsPage() {
     redirect("/");
   }
 
-  const [account, signature, smtpConfig] = await Promise.all([
-    getDecryptedGoogleAccount(session.user.id),
+  const [signature, smtpConfig] = await Promise.all([
     getSignature(session.user.id),
     getSmtpConfig(session.user.id),
   ]);
@@ -26,25 +24,9 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Gmail Connection</CardTitle>
+            <CardTitle>Webmail (SMTP)</CardTitle>
             <CardDescription>
-              Used to send campaigns, unless a custom SMTP account is configured below.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {account ? (
-              <Badge variant="success">Connected as {session.user.email}</Badge>
-            ) : (
-              <Badge variant="destructive">Not connected — please reconnect Gmail</Badge>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Custom SMTP (Webmail)</CardTitle>
-            <CardDescription>
-              Send from your own domain email (cPanel, Zoho Mail, Titan, etc.) instead of Gmail.
+              The account campaigns send from — your own domain email (cPanel, Zoho Mail, Titan, etc.).
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { webmailSignInAction } from "@/actions/webmail-auth-actions";
 
 export function WebmailSignInForm() {
-  const [expanded, setExpanded] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [host, setHost] = useState("");
@@ -14,14 +13,6 @@ export function WebmailSignInForm() {
   const [secure, setSecure] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  if (!expanded) {
-    return (
-      <Button type="button" variant="outline" size="lg" onClick={() => setExpanded(true)}>
-        Connect Webmail
-      </Button>
-    );
-  }
 
   async function handleSubmit() {
     setError(null);
@@ -77,14 +68,9 @@ export function WebmailSignInForm() {
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="flex gap-2">
-        <Button type="button" onClick={handleSubmit} disabled={isSubmitting} className="flex-1">
-          {isSubmitting ? "Verifying…" : "Sign In"}
-        </Button>
-        <Button type="button" variant="ghost" onClick={() => setExpanded(false)}>
-          Cancel
-        </Button>
-      </div>
+      <Button type="button" onClick={handleSubmit} disabled={isSubmitting} className="w-full">
+        {isSubmitting ? "Verifying…" : "Sign In"}
+      </Button>
     </div>
   );
 }

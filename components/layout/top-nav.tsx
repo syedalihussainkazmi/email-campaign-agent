@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { auth, signOut } from "@/auth/auth";
+import { auth, signOut } from "@/auth/session";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/logo";
 

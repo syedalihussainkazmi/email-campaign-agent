@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { auth } from "@/auth/auth";
+import { auth } from "@/auth/session";
 import { AuthedShell } from "@/components/layout/authed-shell";
 import { listCampaigns } from "@/services/campaign-service";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";

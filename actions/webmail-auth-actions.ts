@@ -18,11 +18,11 @@ const webmailSignInSchema = z.object({
 type WebmailSignInResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Signs in directly with webmail/SMTP credentials, no Google account
- * involved. The credentials are verified against the real SMTP server
- * first (proving ownership), then a user is created/found by email and a
- * session issued the same way the dev-login bypass does. The verified
- * config is saved immediately, so sending works right away post-login.
+ * Signs in directly with webmail/SMTP credentials — the only sign-in path
+ * this app supports. The credentials are verified against the real SMTP
+ * server first (proving ownership), then a user is created/found by email
+ * and a database session is issued directly. The verified config is saved
+ * immediately, so sending works right away post-login.
  */
 export async function webmailSignInAction(
   input: z.infer<typeof webmailSignInSchema>,

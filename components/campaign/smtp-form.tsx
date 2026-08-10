@@ -60,8 +60,7 @@ export function SmtpForm({ initialValue }: { initialValue: SmtpFormInitialValue 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-zinc-500">
-        Configure this to send campaigns through your own domain webmail (cPanel, Zoho Mail, Titan,
-        etc.) instead of Gmail. If set, this takes priority over your connected Gmail account.
+        Configure this to send campaigns through your own domain webmail (cPanel, Zoho Mail, Titan, etc).
       </p>
 
       <div className="grid grid-cols-2 gap-3">

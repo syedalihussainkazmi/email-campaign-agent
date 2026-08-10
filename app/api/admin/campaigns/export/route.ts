@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth/auth";
+import { auth } from "@/auth/session";
 import { searchCampaignsAdmin } from "@/services/admin-service";
 import { toCsv } from "@/utils/export";
 

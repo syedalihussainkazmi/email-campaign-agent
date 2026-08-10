@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth/auth";
+import { auth } from "@/auth/session";
 import { getCampaignProgress } from "@/services/campaign-service";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {

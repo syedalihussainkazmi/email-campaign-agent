@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { auth } from "@/auth/auth";
+import { auth } from "@/auth/session";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
