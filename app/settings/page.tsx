@@ -6,8 +6,10 @@ import { SignatureForm } from "@/components/campaign/signature-form";
 import { SmtpAccountList } from "@/components/campaign/smtp-account-list";
 import { RolloutPlannerPanel } from "@/components/campaign/rollout-planner-panel";
 import { CapacityTimelinePanel } from "@/components/campaign/capacity-timeline-panel";
+import { SendingWindowForm } from "@/components/campaign/sending-window-form";
 import { getSignature } from "@/services/signature-service";
 import { listSmtpAccounts } from "@/services/smtp-service";
+import { getSendingWindow } from "@/services/sending-window-service";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -15,9 +17,10 @@ export default async function SettingsPage() {
     redirect("/");
   }
 
-  const [signature, accounts] = await Promise.all([
+  const [signature, accounts, sendingWindow] = await Promise.all([
     getSignature(session.user.id),
     listSmtpAccounts(session.user.id),
+    getSendingWindow(session.user.id),
   ]);
 
   return (
@@ -55,6 +58,16 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <CapacityTimelinePanel />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Sending Window</CardTitle>
+            <CardDescription>Restrict campaigns to business hours for your audience&apos;s timezone.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SendingWindowForm initialValue={sendingWindow} />
           </CardContent>
         </Card>
 

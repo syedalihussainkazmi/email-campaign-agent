@@ -2865,7 +2865,7 @@ git commit -m "Add one-click unsubscribe with List-Unsubscribe/List-Unsubscribe-
 
 **Scope note**: this can't know an individual recipient's actual location/timezone from just their email address — there's no reliable way to geolocate an arbitrary address. What it *can* do is let you set a single sending window (e.g. "9am–5pm, Mon–Fri, Australia/Brisbane") for your intended audience, and the runner simply won't send outside it. That's the honest, buildable version of "business-hours-aware."
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```typescript
 import { describe, it, expect } from "vitest";
@@ -2902,12 +2902,12 @@ describe("isWithinSendingWindow", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/sending-window-service.test.ts`
 Expected: FAIL — `Cannot find module '@/services/sending-window-service'`
 
-- [ ] **Step 3: Implement `services/sending-window-service.ts`**
+- [x] **Step 3: Implement `services/sending-window-service.ts`**
 
 ```typescript
 import { prisma } from "@/database/prisma";
@@ -2962,12 +2962,12 @@ export async function setSendingWindow(userId: string, window: SendingWindow): P
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/sending-window-service.test.ts`
 Expected: PASS — 5 tests.
 
-- [ ] **Step 5: Check the window in the send loop**
+- [x] **Step 5: Check the window in the send loop**
 
 In `server/campaign-runner.ts`, near the top of the `while (true)` loop, after the existing pause/cancel checks:
 ```typescript
@@ -2979,7 +2979,7 @@ if (!isWithinSendingWindow(new Date(), window)) {
 ```
 (Fetching the window on every loop iteration keeps it responsive to mid-campaign edits; it's a single indexed `Setting` row lookup, not meaningfully expensive at this send pace of one recipient per 5-10 seconds.)
 
-- [ ] **Step 6: Build the Settings form**
+- [x] **Step 6: Build the Settings form**
 
 ```typescript
 "use client";
@@ -3040,7 +3040,7 @@ export function SendingWindowForm({ initialValue }: { initialValue: SendingWindo
 }
 ```
 
-- [ ] **Step 7: Wire up the action and Settings page**
+- [x] **Step 7: Wire up the action and Settings page**
 
 ```typescript
 // in actions/settings-actions.ts
@@ -3064,7 +3064,7 @@ export async function saveSendingWindowAction(input: z.infer<typeof sendingWindo
 
 In `app/settings/page.tsx`, fetch `getSendingWindow(session.user.id)` alongside the other settings and render a new card with `<SendingWindowForm initialValue={sendingWindow} />`.
 
-- [ ] **Step 8: Typecheck, test, commit**
+- [x] **Step 8: Typecheck, test, commit**
 
 Run: `npx tsc --noEmit && npx vitest run`
 ```bash

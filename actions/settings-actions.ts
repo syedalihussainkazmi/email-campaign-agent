@@ -5,6 +5,7 @@ import { requireSession } from "@/auth/session";
 import { setSignature } from "@/services/signature-service";
 import { createSmtpAccount, deleteSmtpAccount } from "@/services/smtp-service";
 import { verifySmtpConfig } from "@/services/smtp-sender";
+import { setSendingWindow, type SendingWindow } from "@/services/sending-window-service";
 import { revalidatePath } from "next/cache";
 
 const signatureSchema = z.object({ signature: z.string().max(20000) });
@@ -51,6 +52,21 @@ export async function addSmtpAccountAction(input: z.infer<typeof smtpAccountSche
 export async function removeSmtpAccountAction(accountId: string) {
   const session = await requireSession();
   await deleteSmtpAccount(accountId, session.user.id);
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+const sendingWindowSchema = z.object({
+  startHour: z.number().int().min(0).max(23),
+  endHour: z.number().int().min(0).max(23),
+  timezone: z.string().min(1),
+  sendOnWeekends: z.boolean(),
+});
+
+export async function saveSendingWindowAction(input: z.infer<typeof sendingWindowSchema>) {
+  const session = await requireSession();
+  const parsed = sendingWindowSchema.parse(input) satisfies SendingWindow;
+  await setSendingWindow(session.user.id, parsed);
   revalidatePath("/settings");
   return { ok: true };
 }

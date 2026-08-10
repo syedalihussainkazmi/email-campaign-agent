@@ -7,6 +7,7 @@ import { renderTemplate } from "@/utils/template";
 import { looksLikeHtml, stripHtml } from "@/utils/html";
 import { rewriteLinksForTracking } from "@/utils/link-tracking";
 import { buildUnsubscribeHeaders } from "@/services/unsubscribe-service";
+import { getSendingWindow, isWithinSendingWindow } from "@/services/sending-window-service";
 
 const activeRunners = new Set<string>();
 
@@ -56,6 +57,12 @@ export async function startCampaignRunner(campaignId: string) {
       if (fresh.controlFlag === "pause") {
         await prisma.campaign.update({ where: { id: campaignId }, data: { status: "paused" } });
         return;
+      }
+
+      const window = await getSendingWindow(campaign.userId);
+      if (!isWithinSendingWindow(new Date(), window)) {
+        await prisma.campaign.update({ where: { id: campaignId }, data: { status: "paused" } });
+        return; // picked back up by the same daily/periodic trigger as Task 9's multi-day resume
       }
 
       const next = await prisma.campaignRecipient.findFirst({
