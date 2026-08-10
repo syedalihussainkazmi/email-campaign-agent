@@ -8,7 +8,10 @@ import { verifySmtpConfig } from "@/services/smtp-sender";
 import { setSendingWindow, type SendingWindow } from "@/services/sending-window-service";
 import { revalidatePath } from "next/cache";
 
-const signatureSchema = z.object({ signature: z.string().max(20000) });
+// Signatures with embedded base64 images (logo + social icons) can run well
+// past plain-text length — 100KB comfortably covers that while still bounding
+// abuse. The Setting.value column itself is unbounded Postgres TEXT.
+const signatureSchema = z.object({ signature: z.string().max(100000) });
 
 export async function saveSignatureAction(input: z.infer<typeof signatureSchema>) {
   const session = await requireSession();
