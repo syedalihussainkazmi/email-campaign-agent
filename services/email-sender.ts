@@ -1,5 +1,5 @@
 import { SmtpEmailSender } from "@/services/smtp-sender";
-import { getSmtpConfig } from "@/services/smtp-service";
+import { getSmtpAccountWithPassword } from "@/services/smtp-service";
 
 export interface OutgoingEmail {
   to: string;
@@ -13,38 +13,22 @@ export interface SendResult {
   error?: string;
 }
 
-/** Port every email transport must implement, so swapping mock/SMTP is a one-line config change. */
+/** Port every email transport must implement. */
 export interface EmailSenderPort {
   send(userId: string, message: OutgoingEmail): Promise<SendResult>;
 }
 
-/**
- * Default sender for local/dev use when no webmail SMTP credentials are
- * configured yet. Simulates network latency and an occasional failure so
- * the UI/progress flow can be exercised end-to-end.
- */
-export class MockEmailSender implements EmailSenderPort {
-  async send(_userId: string, message: OutgoingEmail): Promise<SendResult> {
-    await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 300));
+/** Resolves the sender for one specific SmtpAccount — a campaign's recipients may span several. */
+export async function getEmailSenderForAccount(accountId: string, userId: string): Promise<EmailSenderPort> {
+  const account = await getSmtpAccountWithPassword(accountId, userId);
+  if (!account) throw new Error(`SMTP account ${accountId} not found for this user`);
 
-    if (!message.to.includes("@")) {
-      return { success: false, error: "Invalid recipient address" };
-    }
-
-    return { success: true };
-  }
-}
-
-/**
- * Resolves the sender for a specific user: their own custom SMTP (webmail)
- * credentials, which every real account has from sign-in, or the mock
- * sender as a fallback for local/dev use with no credentials configured.
- */
-export async function getEmailSenderForUser(userId: string): Promise<EmailSenderPort> {
-  const smtpConfig = await getSmtpConfig(userId);
-  if (smtpConfig) {
-    return new SmtpEmailSender(smtpConfig);
-  }
-
-  return new MockEmailSender();
+  return new SmtpEmailSender({
+    host: account.host,
+    port: account.port,
+    secure: account.secure,
+    username: account.username,
+    password: account.password,
+    fromEmail: account.fromEmail,
+  });
 }
