@@ -4,6 +4,7 @@ import { AuthedShell } from "@/components/layout/authed-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { SignatureForm } from "@/components/campaign/signature-form";
 import { SmtpAccountList } from "@/components/campaign/smtp-account-list";
+import { RolloutPlannerPanel } from "@/components/campaign/rollout-planner-panel";
 import { getSignature } from "@/services/signature-service";
 import { listSmtpAccounts } from "@/services/smtp-service";
 
@@ -29,6 +30,18 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <SmtpAccountList accounts={accounts} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Volume Calculator</CardTitle>
+            <CardDescription>
+              Plan a rollout from scratch, independent of what&apos;s currently connected.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RolloutPlannerPanel />
           </CardContent>
         </Card>
 

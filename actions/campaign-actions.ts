@@ -8,6 +8,7 @@ import { startCampaignRunner } from "@/server/campaign-runner";
 import { isRateLimited } from "@/server/rate-limiter";
 import { listSmtpAccounts } from "@/services/smtp-service";
 import { buildSendPlan, toPlannerAccount } from "@/services/send-planner";
+import { planNewRollout } from "@/services/rollout-planner";
 
 const createCampaignSchema = z.object({
   subject: z.string().min(1).max(300),
@@ -74,6 +75,14 @@ export async function getSendPlanAction(input: z.infer<typeof sendPlanSchema>) {
   const allAccounts = await listSmtpAccounts(session.user.id);
   const selected = allAccounts.filter((a) => accountIds.includes(a.id)).map(toPlannerAccount);
   return buildSendPlan(recipientCount, selected, { hasPersonalization });
+}
+
+const rolloutPlanSchema = z.object({ totalRecipients: z.number().int().min(1) });
+
+export async function planRolloutAction(input: z.infer<typeof rolloutPlanSchema>) {
+  await requireSession();
+  const { totalRecipients } = rolloutPlanSchema.parse(input);
+  return planNewRollout(totalRecipients);
 }
 
 const controlSchema = z.object({
