@@ -153,6 +153,27 @@ export function buildUncappedAllocations(
   }));
 }
 
+/**
+ * Estimates wall-clock time to send today's batch, given the runner's
+ * one-recipient-at-a-time pacing (server/campaign-runner.ts): a flat 5s gap
+ * when fixed pace is on, or the midpoint of the randomized 5-10s gap
+ * otherwise. Pure arithmetic — not a promise about real-world SMTP latency.
+ */
+export function estimateSendSeconds(todaysBatchSize: number, useFixedPace: boolean): number {
+  const avgDelaySeconds = useFixedPace ? 5 : 7.5;
+  return Math.round(Math.max(0, todaysBatchSize - 1) * avgDelaySeconds);
+}
+
+/** Formats a second count as a compact human string: "45s", "12m", "1h 30m". */
+export function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.round(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
 export interface CapacityProjection {
   dailyCapacityByDay: number[];
   daysToClear: number | null;

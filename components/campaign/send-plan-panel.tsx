@@ -6,17 +6,23 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { panelVariants } from "@/utils/motion";
 import type { SendPlan } from "@/services/send-planner";
-import { ageInDays } from "@/services/send-planner";
+import { ageInDays, estimateSendSeconds, formatDuration } from "@/services/send-planner";
 import type { SmtpAccountRecord } from "@/services/smtp-service";
 import { getSendPlanAction, listAccountsForPlanningAction } from "@/actions/campaign-actions";
 
 interface SendPlanPanelProps {
   recipientCount: number;
   hasPersonalization: boolean;
+  useFixedPace: boolean;
   onAccountsResolved: (accountIds: string[]) => void;
 }
 
-export function SendPlanPanel({ recipientCount, hasPersonalization, onAccountsResolved }: SendPlanPanelProps) {
+export function SendPlanPanel({
+  recipientCount,
+  hasPersonalization,
+  useFixedPace,
+  onAccountsResolved,
+}: SendPlanPanelProps) {
   const [accounts, setAccounts] = useState<SmtpAccountRecord[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [plan, setPlan] = useState<SendPlan | null>(null);
@@ -38,11 +44,13 @@ export function SendPlanPanel({ recipientCount, hasPersonalization, onAccountsRe
       onAccountsResolved([]);
       return;
     }
-    getSendPlanAction({ recipientCount, hasPersonalization, accountIds: selectedIds }).then((result) => {
-      setPlan(result);
-      onAccountsResolved(result.allocations.map((a) => a.accountId));
-    });
-  }, [recipientCount, hasPersonalization, selectedIds, accounts.length, onAccountsResolved]);
+    getSendPlanAction({ recipientCount, hasPersonalization, accountIds: selectedIds, useFixedPace }).then(
+      (result) => {
+        setPlan(result);
+        onAccountsResolved(result.allocations.map((a) => a.accountId));
+      },
+    );
+  }, [recipientCount, hasPersonalization, useFixedPace, selectedIds, accounts.length, onAccountsResolved]);
 
   function toggle(id: string) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -83,6 +91,17 @@ export function SendPlanPanel({ recipientCount, hasPersonalization, onAccountsRe
                 <span>{a.count} today</span>
               </div>
             ))}
+            {plan.allocations.length > 0 && (
+              <p className="text-xs text-zinc-400">
+                Estimated time to send today&apos;s batch: ~
+                {formatDuration(
+                  estimateSendSeconds(
+                    plan.allocations.reduce((sum, a) => sum + a.count, 0),
+                    useFixedPace,
+                  ),
+                )}
+              </p>
+            )}
             {plan.estimatedDays > 1 && (
               <Badge variant="warning">Will take ~{plan.estimatedDays} days to finish safely</Badge>
             )}

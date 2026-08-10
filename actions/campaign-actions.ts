@@ -80,13 +80,28 @@ const sendPlanSchema = z.object({
   recipientCount: z.number().int().min(0),
   hasPersonalization: z.boolean(),
   accountIds: z.array(z.string()).default([]),
+  useFixedPace: z.boolean().default(false),
 });
 
 export async function getSendPlanAction(input: z.infer<typeof sendPlanSchema>) {
   const session = await requireSession();
-  const { recipientCount, hasPersonalization, accountIds } = sendPlanSchema.parse(input);
+  const { recipientCount, hasPersonalization, accountIds, useFixedPace } = sendPlanSchema.parse(input);
   const allAccounts = await listSmtpAccounts(session.user.id);
   const selected = allAccounts.filter((a) => accountIds.includes(a.id)).map(toPlannerAccount);
+
+  if (useFixedPace) {
+    const allocations = buildUncappedAllocations(recipientCount, selected);
+    return {
+      totalRecipients: recipientCount,
+      estimatedDays: allocations.length > 0 ? 1 : 0,
+      allocations,
+      warnings:
+        allocations.length > 0
+          ? ["Ignoring daily send caps — every recipient sends today regardless of account age."]
+          : ["You have no active email accounts connected — add one in Settings before sending."],
+    };
+  }
+
   return buildSendPlan(recipientCount, selected, { hasPersonalization });
 }
 

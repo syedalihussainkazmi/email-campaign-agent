@@ -72,6 +72,7 @@ export function CampaignCard() {
         <SendPlanPanel
           recipientCount={recipients.length}
           hasPersonalization={hasPersonalization}
+          useFixedPace={useFixedPace}
           onAccountsResolved={setResolvedAccountIds}
         />
 

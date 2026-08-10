@@ -5,6 +5,8 @@ import {
   capForAge,
   ageInDays,
   projectAccountCapacityTimeline,
+  estimateSendSeconds,
+  formatDuration,
 } from "@/services/send-planner";
 
 const account = (overrides: Partial<Parameters<typeof buildSendPlan>[1][number]> = {}) => ({
@@ -158,5 +160,39 @@ describe("buildUncappedAllocations", () => {
   it("returns no allocations when there are no active accounts or no recipients", () => {
     expect(buildUncappedAllocations(10, [])).toEqual([]);
     expect(buildUncappedAllocations(0, [account()])).toEqual([]);
+  });
+});
+
+describe("estimateSendSeconds", () => {
+  it("uses a flat 5s gap for fixed pace", () => {
+    // 10 recipients = 9 gaps between them
+    expect(estimateSendSeconds(10, true)).toBe(45);
+  });
+
+  it("uses the 7.5s midpoint of the randomized 5-10s gap otherwise", () => {
+    expect(estimateSendSeconds(10, false)).toBe(68); // round(9 * 7.5) = 68
+  });
+
+  it("returns 0 for a single recipient (no gap needed) or none", () => {
+    expect(estimateSendSeconds(1, true)).toBe(0);
+    expect(estimateSendSeconds(0, true)).toBe(0);
+  });
+});
+
+describe("formatDuration", () => {
+  it("formats sub-minute durations as seconds", () => {
+    expect(formatDuration(45)).toBe("45s");
+  });
+
+  it("formats sub-hour durations as minutes", () => {
+    expect(formatDuration(600)).toBe("10m");
+  });
+
+  it("formats hour-plus durations as hours and minutes", () => {
+    expect(formatDuration(5400)).toBe("1h 30m");
+  });
+
+  it("omits minutes when they round to zero", () => {
+    expect(formatDuration(3600)).toBe("1h");
   });
 });
