@@ -35,6 +35,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   const pendingCount = campaign.totalCount - campaign.sentCount;
   const clickedCount = campaign.recipients.filter((cr) => cr.clickCount > 0).length;
+  const openedCount = campaign.recipients.filter((cr) => cr.openedAt !== null).length;
 
   return (
     <AuthedShell>
@@ -58,13 +59,14 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             <Badge variant={CAMPAIGN_STATUS_VARIANT[campaign.status]}>{campaign.status}</Badge>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-7">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-8">
               <Stat label="Total Recipients" value={campaign.totalCount} />
               <Stat label="Sent" value={campaign.sentCount} />
               <Stat label="Delivered" value={campaign.deliveredCount} variant="success" />
               <Stat label="Failed" value={campaign.failedCount} variant="destructive" />
               <Stat label="Bounced" value={campaign.bouncedCount} variant="destructive" />
               <Stat label="Replied" value={campaign.repliedCount} variant="success" />
+              <Stat label="Opened" value={openedCount} variant="success" />
               <Stat label="Clicked" value={clickedCount} variant="success" />
               <Stat label="Remaining" value={Math.max(0, pendingCount)} />
             </div>
@@ -73,6 +75,11 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 Average interval between sends: ~{Math.round(campaign.avgIntervalSeconds)}s
               </p>
             )}
+            <p className="mt-2 text-xs text-zinc-500">
+              Opens are a directional signal, not exact — Apple Mail preloads images for every
+              recipient regardless of a real open, while some clients block remote images
+              entirely.
+            </p>
           </CardContent>
         </Card>
 
@@ -91,6 +98,8 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                     <th className="px-3 py-2">Owner</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Sent At</th>
+                    <th className="px-3 py-2">Opens</th>
+                    <th className="px-3 py-2">Opened At</th>
                     <th className="px-3 py-2">Clicks</th>
                     <th className="px-3 py-2">Error</th>
                   </tr>
@@ -106,6 +115,10 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                       </td>
                       <td className="px-3 py-2 text-zinc-500">
                         {cr.sentAt ? cr.sentAt.toLocaleString() : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-400">{cr.openCount || "—"}</td>
+                      <td className="px-3 py-2 text-zinc-500">
+                        {cr.openedAt ? cr.openedAt.toLocaleString() : "—"}
                       </td>
                       <td className="px-3 py-2 text-zinc-400">{cr.clickCount || "—"}</td>
                       <td className="px-3 py-2 text-red-400">{cr.error || "—"}</td>

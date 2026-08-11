@@ -5,7 +5,7 @@ import { getSignature } from "@/services/signature-service";
 import { randomDelaySeconds, sleep } from "@/utils/delay";
 import { renderTemplate } from "@/utils/template";
 import { looksLikeHtml, stripHtml } from "@/utils/html";
-import { rewriteLinksForTracking } from "@/utils/link-tracking";
+import { rewriteLinksForTracking, openTrackingPixel } from "@/utils/link-tracking";
 import { buildUnsubscribeHeaders } from "@/services/unsubscribe-service";
 import { getSendingWindow, isWithinSendingWindow } from "@/services/sending-window-service";
 
@@ -120,11 +120,14 @@ export async function startCampaignRunner(campaignId: string) {
       const unsubscribeFooter =
         `<br/><br/><p style="font-size:11px;color:#888">Don't want these emails? ` +
         `<a href="${unsubscribeUrl}">Unsubscribe</a></p>`;
+      const pixel = process.env.APP_BASE_URL
+        ? openTrackingPixel(next.trackingId, process.env.APP_BASE_URL)
+        : "";
 
       const result = await sender.send(campaign.userId, {
         to: recipient.email,
         subject: renderTemplate(campaign.subject, variables),
-        bodyHtml: trackedHtml + unsubscribeFooter,
+        bodyHtml: trackedHtml + unsubscribeFooter + pixel,
         bodyText: campaign.bodyText
           ? renderTemplate(campaign.bodyText, variables) + signatureText + `\n\nUnsubscribe: ${unsubscribeUrl}`
           : undefined,
