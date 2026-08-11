@@ -31,7 +31,11 @@ export function SendingWindowForm({ initialValue }: { initialValue: SendingWindo
       </p>
       <div className="grid grid-cols-2 gap-3">
         <Input placeholder="Start hour (0-23)" value={startHour} onChange={(e) => setStartHour(e.target.value)} />
-        <Input placeholder="End hour (0-23)" value={endHour} onChange={(e) => setEndHour(e.target.value)} />
+        <Input
+          placeholder="End hour (1-24, 24 = midnight)"
+          value={endHour}
+          onChange={(e) => setEndHour(e.target.value)}
+        />
         <Input
           placeholder="Timezone (e.g. Australia/Brisbane)"
           value={timezone}

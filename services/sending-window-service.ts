@@ -2,7 +2,7 @@ import { prisma } from "@/database/prisma";
 
 export interface SendingWindow {
   startHour: number; // 0-23, inclusive
-  endHour: number; // 0-23, exclusive
+  endHour: number; // 1-24, exclusive — 24 means "through midnight, no cutoff"
   timezone: string; // IANA timezone, e.g. "Australia/Brisbane"
   sendOnWeekends: boolean;
 }

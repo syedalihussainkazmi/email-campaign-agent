@@ -29,4 +29,11 @@ describe("isWithinSendingWindow", () => {
     const aestWindow = { ...window, timezone: "Australia/Brisbane" };
     expect(isWithinSendingWindow(new Date("2026-08-04T20:00:00Z"), aestWindow)).toBe(false);
   });
+
+  it("endHour=24 covers the 11pm hour through midnight; endHour=23 does not", () => {
+    // 2026-08-04T23:30:00Z is a Tuesday, 23:30 UTC
+    const almostMidnight = new Date("2026-08-04T23:30:00Z");
+    expect(isWithinSendingWindow(almostMidnight, { ...window, startHour: 0, endHour: 23 })).toBe(false);
+    expect(isWithinSendingWindow(almostMidnight, { ...window, startHour: 0, endHour: 24 })).toBe(true);
+  });
 });

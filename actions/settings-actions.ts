@@ -61,7 +61,11 @@ export async function removeSmtpAccountAction(accountId: string) {
 
 const sendingWindowSchema = z.object({
   startHour: z.number().int().min(0).max(23),
-  endHour: z.number().int().min(0).max(23),
+  // 24 (not 23) is the correct max here: isWithinSendingWindow checks
+  // `hour < endHour`, so 24 is what actually means "through midnight,
+  // no cutoff" — capping at 23 would make the 11pm hour permanently
+  // unreachable regardless of what's configured.
+  endHour: z.number().int().min(1).max(24),
   timezone: z.string().min(1),
   sendOnWeekends: z.boolean(),
 });
