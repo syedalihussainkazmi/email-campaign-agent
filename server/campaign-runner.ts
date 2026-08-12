@@ -116,10 +116,16 @@ export async function startCampaignRunner(campaignId: string) {
         ? rewriteLinksForTracking(renderedHtml, next.trackingId, process.env.APP_BASE_URL)
         : renderedHtml;
 
-      const unsubscribeUrl = `${process.env.APP_BASE_URL}/api/unsubscribe/${recipient.unsubscribeToken}`;
-      const unsubscribeFooter =
-        `<br/><br/><p style="font-size:11px;color:#888">Don't want these emails? ` +
-        `<a href="${unsubscribeUrl}">Unsubscribe</a></p>`;
+      // Unsubscribe link/header, click-tracking, and the open pixel all require a
+      // real publicly-reachable APP_BASE_URL — without one, none of them are
+      // included rather than shipping a broken "undefined/..." URL in every email.
+      const unsubscribeUrl = process.env.APP_BASE_URL
+        ? `${process.env.APP_BASE_URL}/api/unsubscribe/${recipient.unsubscribeToken}`
+        : null;
+      const unsubscribeFooter = unsubscribeUrl
+        ? `<br/><br/><p style="font-size:11px;color:#888">Don't want these emails? ` +
+          `<a href="${unsubscribeUrl}">Unsubscribe</a></p>`
+        : "";
       const pixel = process.env.APP_BASE_URL
         ? openTrackingPixel(next.trackingId, process.env.APP_BASE_URL)
         : "";
@@ -129,9 +135,11 @@ export async function startCampaignRunner(campaignId: string) {
         subject: renderTemplate(campaign.subject, variables),
         bodyHtml: trackedHtml + unsubscribeFooter + pixel,
         bodyText: campaign.bodyText
-          ? renderTemplate(campaign.bodyText, variables) + signatureText + `\n\nUnsubscribe: ${unsubscribeUrl}`
+          ? renderTemplate(campaign.bodyText, variables) +
+            signatureText +
+            (unsubscribeUrl ? `\n\nUnsubscribe: ${unsubscribeUrl}` : "")
           : undefined,
-        headers: buildUnsubscribeHeaders(unsubscribeUrl),
+        headers: unsubscribeUrl ? buildUnsubscribeHeaders(unsubscribeUrl) : undefined,
       });
 
       if (result.success) {
