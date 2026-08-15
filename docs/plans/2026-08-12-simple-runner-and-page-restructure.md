@@ -43,7 +43,7 @@ A new shared `CampaignActionsBar` client component (Pause/Resume/Cancel/Delete, 
 **Files:**
 - Modify: `prisma/schema.prisma`
 
-- [ ] **Step 1: Add the fields**
+- [x] **Step 1: Add the fields**
 
 In the `Campaign` model, add two nullable fields right after `fixedDelaySeconds`:
 
@@ -66,13 +66,13 @@ model Campaign {
 }
 ```
 
-- [ ] **Step 2: Generate and apply the migration**
+- [x] **Step 2: Generate and apply the migration**
 
 Run: `cd /home/user/email-campaign-agent && npx prisma migrate dev --name add_campaign_account_and_cap`
 
 Expected: migration applies cleanly (both new columns are nullable — safe on a non-empty table, no backfill needed).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add prisma/schema.prisma prisma/migrations
@@ -86,7 +86,7 @@ git commit -m "Add Campaign.smtpAccountId/dailyCap bookkeeping fields"
 **Files:**
 - Modify: `services/campaign-service.ts`
 
-- [ ] **Step 1: Add the function**
+- [x] **Step 1: Add the function**
 
 Add after `setCampaignControlFlag`:
 
@@ -98,12 +98,12 @@ export async function deleteCampaign(userId: string, campaignId: string) {
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add services/campaign-service.ts
@@ -118,7 +118,7 @@ git commit -m "Add deleteCampaign service function"
 - Modify: `services/send-planner.ts`
 - Modify: `tests/send-planner.test.ts`
 
-- [ ] **Step 1: Delete `buildSendPlan`, `buildUncappedAllocations`, and the `SendPlan` interface**
+- [x] **Step 1: Delete `buildSendPlan`, `buildUncappedAllocations`, and the `SendPlan` interface**
 
 Remove these three blocks from `services/send-planner.ts` (everything between `export interface SendPlan {` and the end of `buildUncappedAllocations`'s closing brace, i.e. lines defining `SendPlan`, `buildSendPlan`, and `buildUncappedAllocations`). Also remove the now-unused `dailyCapFor`/`remainingToday` helpers **only if nothing else references them** — check first:
 
@@ -247,7 +247,7 @@ export function projectAccountCapacityTimeline(
 }
 ```
 
-- [ ] **Step 2: Remove the now-obsolete tests**
+- [x] **Step 2: Remove the now-obsolete tests**
 
 Open `tests/send-planner.test.ts` and delete the `describe("buildSendPlan", ...)` block in full, and delete the `describe("buildUncappedAllocations", ...)` block in full. Also remove `buildSendPlan` and `buildUncappedAllocations` from the top `import` line, leaving:
 
@@ -267,12 +267,12 @@ Run: `cd /home/user/email-campaign-agent && grep -n "account(" tests/send-planne
 
 If no calls remain outside the helper's own definition, delete the helper too.
 
-- [ ] **Step 3: Run the remaining tests**
+- [x] **Step 3: Run the remaining tests**
 
 Run: `cd /home/user/email-campaign-agent && npx vitest run tests/send-planner.test.ts`
 Expected: PASS — remaining tests for `capForAge`, `ageInDays`, `projectAccountCapacityTimeline`, `estimateSendSeconds`, `formatDuration` all still pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add services/send-planner.ts tests/send-planner.test.ts
@@ -286,7 +286,7 @@ git commit -m "Remove auto-distribution (buildSendPlan/buildUncappedAllocations)
 **Files:**
 - Modify: `actions/campaign-actions.ts`
 
-- [ ] **Step 1: Replace `createAndStartCampaignAction` and its schema**
+- [x] **Step 1: Replace `createAndStartCampaignAction` and its schema**
 
 Replace the whole file with:
 
@@ -434,12 +434,12 @@ export async function deleteCampaignAction(input: z.infer<typeof deleteSchema>) 
 
 This deletes the old `buildSendPlan`/`buildUncappedAllocations`/`getSendPlanAction` code path entirely and replaces `accountIds: string[]` with a single `accountId` plus a manually-typed `dailyCap`.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add actions/campaign-actions.ts
@@ -453,7 +453,7 @@ git commit -m "Replace auto-distribution with manual single-account + daily-cap 
 **Files:**
 - Modify: `utils/motion.ts`
 
-- [ ] **Step 1: Add stagger variants**
+- [x] **Step 1: Add stagger variants**
 
 Append to `utils/motion.ts`:
 
@@ -471,12 +471,12 @@ export const staggerItem: Variants = {
 };
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add utils/motion.ts
@@ -492,7 +492,7 @@ git commit -m "Add stagger motion variants for list entrance animation"
 
 This is the single component that makes Pause/Resume/Cancel/Delete work identically on Dashboard, History list, and History detail — each of those pages renders this same component and nothing else for controls.
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 ```typescript
 "use client";
@@ -581,12 +581,12 @@ export function CampaignActionsBar({ campaignId, status, size = "sm" }: Campaign
 
 The `onClick={(e) => e.stopPropagation()}` on the wrapping `div` matters: History list rows are wrapped in a `<Link>` (clicking the card navigates to the detail page) — without stopping propagation, clicking a button inside that row would both fire the button's own handler *and* navigate away.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add components/campaign/campaign-actions-bar.tsx
@@ -602,7 +602,7 @@ git commit -m "Add shared CampaignActionsBar (Pause/Resume/Cancel/Delete)"
 
 `app/dashboard/page.tsx` and `app/history/page.tsx` are both async server components (they call `auth()` and fetch data server-side) — framer-motion's `motion.div` only works inside a client component. Rather than duplicate the stagger-list markup twice, this one client component takes a plain array of campaign summaries and renders them, reused by both Dashboard (compact stats) and History (full stats).
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 ```typescript
 "use client";
@@ -683,12 +683,12 @@ export function CampaignList({ campaigns, variant }: CampaignListProps) {
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors (the `CampaignActionsBar` import here is forward-referencing Task 6, already built by this point).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add components/campaign/campaign-list.tsx
@@ -704,7 +704,7 @@ git commit -m "Add shared animated CampaignList (used by Dashboard and History)"
 
 Replaces `SendPlanPanel`'s role: instead of a multi-select checkbox list that auto-computes an allocation, this is a single dropdown plus a manual number input, with a non-binding suggestion shown alongside.
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 ```typescript
 "use client";
@@ -785,12 +785,12 @@ export function AccountPicker({ accountId, onAccountChange, dailyCap, onDailyCap
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add components/campaign/account-picker.tsx
@@ -806,7 +806,7 @@ git commit -m "Add AccountPicker (single account + manual daily cap, with a non-
 - Delete: `components/campaign/campaign-card.tsx`
 - Delete: `components/campaign/send-plan-panel.tsx`
 
-- [ ] **Step 1: Write the new composer**
+- [x] **Step 1: Write the new composer**
 
 ```typescript
 "use client";
@@ -926,19 +926,19 @@ export function CampaignRunnerForm() {
 }
 ```
 
-- [ ] **Step 2: Delete the two superseded files**
+- [x] **Step 2: Delete the two superseded files**
 
 ```bash
 rm /home/user/email-campaign-agent/components/campaign/campaign-card.tsx
 rm /home/user/email-campaign-agent/components/campaign/send-plan-panel.tsx
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: errors pointing at every file that still imports `CampaignCard` or `SendPlanPanel` (at minimum `app/page.tsx`) — that's expected and gets fixed in Task 14.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -954,7 +954,7 @@ git commit -m "Add CampaignRunnerForm, remove CampaignCard and SendPlanPanel"
 **Files:**
 - Create: `app/campaign/page.tsx`
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```typescript
 import { redirect } from "next/navigation";
@@ -976,12 +976,12 @@ export default async function CampaignPage() {
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: this file itself is clean (pre-existing errors from Task 9 elsewhere are still expected at this point).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/campaign/page.tsx
@@ -995,7 +995,7 @@ git commit -m "Add /campaign page hosting the campaign runner"
 **Files:**
 - Create: `app/webmails/page.tsx`
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```typescript
 import { redirect } from "next/navigation";
@@ -1030,11 +1030,11 @@ export default async function WebmailsPage() {
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/webmails/page.tsx
@@ -1048,7 +1048,7 @@ git commit -m "Add /webmails page"
 **Files:**
 - Create: `app/calculator/page.tsx`
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```typescript
 import { redirect } from "next/navigation";
@@ -1097,11 +1097,11 @@ export default async function CalculatorPage() {
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/calculator/page.tsx
@@ -1117,7 +1117,7 @@ git commit -m "Add /calculator page"
 
 This becomes the new post-login landing page: stat tiles plus every non-finished campaign (running/paused/draft) with working controls right there, no click-through needed.
 
-- [ ] **Step 1: Write the page**
+- [x] **Step 1: Write the page**
 
 ```typescript
 import { redirect } from "next/navigation";
@@ -1184,12 +1184,12 @@ export default async function DashboardPage() {
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors from this file (check that `prisma.campaign.aggregate`'s return shape matches — `_sum.sentCount` etc. are typed `number | null`, hence the `?? 0` fallbacks above; and that `Campaign` rows returned by `listCampaigns` structurally satisfy `CampaignListItem` from Task 7 — they do, since `listCampaigns` returns full Prisma `Campaign` rows which are a superset of that interface's fields).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/dashboard/page.tsx
@@ -1204,7 +1204,7 @@ git commit -m "Add /dashboard page with stat tiles and working campaign controls
 - Modify: `app/settings/page.tsx`
 - Modify: `app/page.tsx`
 
-- [ ] **Step 1: Trim Settings down to Signature + Sending Window only**
+- [x] **Step 1: Trim Settings down to Signature + Sending Window only**
 
 Replace `app/settings/page.tsx` in full:
 
@@ -1258,7 +1258,7 @@ export default async function SettingsPage() {
 }
 ```
 
-- [ ] **Step 2: Redirect logged-in visitors from `/` to `/dashboard`**
+- [x] **Step 2: Redirect logged-in visitors from `/` to `/dashboard`**
 
 Replace `app/page.tsx` in full:
 
@@ -1295,12 +1295,12 @@ export default async function HomePage() {
 }
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors anywhere now (this was the fix for the errors Task 9 intentionally left behind).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/settings/page.tsx app/page.tsx
@@ -1315,7 +1315,7 @@ git commit -m "Trim Settings to signature/sending-window, redirect logged-in roo
 - Modify: `app/history/page.tsx`
 - Modify: `app/history/[id]/page.tsx`
 
-- [ ] **Step 1: Rewrite the History list page to use `CampaignList`**
+- [x] **Step 1: Rewrite the History list page to use `CampaignList`**
 
 Replace `app/history/page.tsx` in full:
 
@@ -1349,7 +1349,7 @@ export default async function HistoryPage() {
 
 `CampaignList` (Task 7) already wraps its `Link` around only the header/stats and puts `CampaignActionsBar` in its own `CardContent` outside that `Link` — so its buttons are never nested inside an `<a>` tag (nesting interactive elements inside a link is both invalid HTML and the source of click-conflicts), and combined with the `stopPropagation()` already inside `CampaignActionsBar` from Task 6, clicking any control button never triggers navigation to the detail page.
 
-- [ ] **Step 2: Add the bar to the detail page**
+- [x] **Step 2: Add the bar to the detail page**
 
 In `app/history/[id]/page.tsx`, add the import and render the bar next to the status badge. Modify the `CardHeader` block:
 
@@ -1372,12 +1372,12 @@ to:
             </div>
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/history/page.tsx "app/history/[id]/page.tsx"
@@ -1391,7 +1391,7 @@ git commit -m "Wire CampaignActionsBar into History list and detail pages"
 **Files:**
 - Modify: `components/layout/top-nav.tsx`
 
-- [ ] **Step 1: Rewrite the nav with all six pages**
+- [x] **Step 1: Rewrite the nav with all six pages**
 
 ```typescript
 import Link from "next/link";
@@ -1450,11 +1450,11 @@ export async function TopNav() {
 
 (`Button`'s base class already includes `transition-[color,background-color,transform]` from the earlier motion pass — the `hover:bg-zinc-800` here rides that same transition, so nav links get a smooth hover instead of a hard snap.)
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add components/layout/top-nav.tsx
@@ -1467,12 +1467,12 @@ git commit -m "Add all six pages to the top nav"
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Full check suite**
+- [x] **Step 1: Full check suite**
 
 Run: `cd /home/user/email-campaign-agent && npx tsc --noEmit && npx vitest run && npx eslint .`
 Expected: all clean.
 
-- [ ] **Step 2: Live walkthrough**
+- [x] **Step 2: Live walkthrough**
 
 Start the app against a local Postgres (same pattern used throughout this project: temporary `.env` with `DATABASE_URL`/`ENCRYPTION_KEY`, `npm run dev`, a scripted Playwright session with a real test session cookie) and confirm, with screenshots:
 
@@ -1487,7 +1487,7 @@ Start the app against a local Postgres (same pattern used throughout this projec
 9. From History's detail view, the same Pause/Resume/Cancel/Delete buttons work identically.
 10. Delete asks for confirmation, then the campaign disappears from History after refresh.
 
-- [ ] **Step 3: Clean up test data and commit any final fixes found during the walkthrough, then push**
+- [x] **Step 3: Clean up test data and commit any final fixes found during the walkthrough, then push**
 
 ```bash
 git push -u origin claude/agent-creation-97aqu9
