@@ -30,9 +30,17 @@ export async function startCampaignRunner(campaignId: string) {
   activeRunners.add(campaignId);
 
   try {
+    // Deliberately doesn't touch controlFlag here: a pending "cancel"/"pause"
+    // set while this campaign had no active runner (e.g. it was orphaned by
+    // a process restart, then picked back up by resume-scheduled) must
+    // survive into the loop below, whose very first check handles it. The
+    // "none" case is already the DB default for brand-new campaigns, and
+    // setCampaignControlAction's explicit Resume path already writes "none"
+    // itself before calling this function — resetting it here again would
+    // only risk clobbering a real pending flag with a race.
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: "running", startedAt: new Date(), controlFlag: "none" },
+      data: { status: "running", startedAt: new Date() },
     });
 
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
