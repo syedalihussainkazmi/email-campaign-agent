@@ -147,3 +147,9 @@ export async function setCampaignControlFlag(
     data: { controlFlag: flag },
   });
 }
+
+export async function deleteCampaign(userId: string, campaignId: string) {
+  // CampaignRecipient rows cascade-delete automatically (onDelete: Cascade
+  // in schema.prisma) — no need to delete them separately first.
+  return prisma.campaign.deleteMany({ where: { id: campaignId, userId } });
+}

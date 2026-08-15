@@ -40,21 +40,6 @@ export interface PlannerAccount {
   isActive: boolean;
 }
 
-export interface SendPlan {
-  totalRecipients: number;
-  estimatedDays: number;
-  allocations: { accountId: string; label: string; count: number }[];
-  warnings: string[];
-}
-
-function dailyCapFor(account: PlannerAccount): number {
-  return account.dailyCapOverride ?? capForAge(account.ageDays);
-}
-
-function remainingToday(account: PlannerAccount): number {
-  return Math.max(0, dailyCapFor(account) - account.sentToday);
-}
-
 /** Converts a stored SmtpAccount-shaped record (mailboxAgeStartDate) into a PlannerAccount (ageDays). */
 export function toPlannerAccount(account: {
   id: string;
@@ -72,85 +57,6 @@ export function toPlannerAccount(account: {
     sentToday: account.sentToday,
     isActive: account.isActive,
   };
-}
-
-/**
- * Computes how to split `recipientCount` new sends across the given
- * accounts without exceeding any single account's safe daily ceiling,
- * plus how many days it will take if total capacity is exceeded today.
- * Pure function — no I/O, no side effects, fully unit-testable.
- */
-export function buildSendPlan(
-  recipientCount: number,
-  accounts: PlannerAccount[],
-  template: { hasPersonalization: boolean },
-): SendPlan {
-  const warnings: string[] = [];
-  const active = accounts.filter((a) => a.isActive);
-
-  if (active.length === 0) {
-    warnings.push("You have no active email accounts connected — add one in Settings before sending.");
-    return { totalRecipients: recipientCount, estimatedDays: 0, allocations: [], warnings };
-  }
-
-  if (!template.hasPersonalization) {
-    warnings.push(
-      "Your subject/body has no personalization tokens ({business name}/{owner name}) — sending " +
-        "identical content to many recipients raises spam risk regardless of volume.",
-    );
-  }
-
-  const totalDailyCapacity = active.reduce((sum, a) => sum + dailyCapFor(a), 0);
-  const estimatedDays = Math.max(1, Math.ceil(recipientCount / totalDailyCapacity));
-
-  if (estimatedDays > 1) {
-    warnings.push(
-      `${recipientCount} recipients exceeds your connected accounts' safe daily capacity ` +
-        `(${totalDailyCapacity}/day). Spreading this over ${estimatedDays} days, or connect ` +
-        `more accounts to finish sooner.`,
-    );
-  }
-
-  // Allocate today's batch only — largest-remaining-capacity-first.
-  const todaysBatchSize = Math.min(recipientCount, totalDailyCapacity);
-  const sorted = [...active].sort((a, b) => remainingToday(b) - remainingToday(a));
-
-  const allocations: SendPlan["allocations"] = [];
-  let remaining = todaysBatchSize;
-  for (const account of sorted) {
-    if (remaining <= 0) break;
-    const take = Math.min(remainingToday(account), remaining);
-    if (take > 0) {
-      allocations.push({ accountId: account.id, label: account.label, count: take });
-      remaining -= take;
-    }
-  }
-
-  return { totalRecipients: recipientCount, estimatedDays, allocations, warnings };
-}
-
-/**
- * Ignores daily send caps entirely and allocates every recipient to today,
- * spread round-robin (evenly, remainder to the first accounts) across every
- * active selected account. This is the explicit opt-out of the ramp-schedule
- * "brain" for a user who has decided the risk tradeoff themselves — never
- * the default path.
- */
-export function buildUncappedAllocations(
-  recipientCount: number,
-  accounts: PlannerAccount[],
-): SendPlan["allocations"] {
-  const active = accounts.filter((a) => a.isActive);
-  if (active.length === 0 || recipientCount === 0) return [];
-
-  const base = Math.floor(recipientCount / active.length);
-  const remainder = recipientCount % active.length;
-
-  return active.map((account, i) => ({
-    accountId: account.id,
-    label: account.label,
-    count: base + (i < remainder ? 1 : 0),
-  }));
 }
 
 /**

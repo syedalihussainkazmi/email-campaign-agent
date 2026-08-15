@@ -114,6 +114,13 @@ model Campaign {
   // gap between sends instead — this only changes pacing, never the daily
   // send caps or multi-day scheduling from the send-planner "brain".
   fixedDelaySeconds  Int?
+  // Which single account this campaign runs from, and the daily cap the
+  // user manually chose for it — bookkeeping for display only (History,
+  // Dashboard). The actual send schedule is already fully encoded per-
+  // recipient via CampaignRecipient.smtpAccountId/scheduledFor at creation
+  // time; these two fields are never read by the runner itself.
+  smtpAccountId      String?
+  dailyCap           Int?
 
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   recipients CampaignRecipient[]
