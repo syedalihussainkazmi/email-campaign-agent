@@ -2,18 +2,14 @@
 
 import { z } from "zod";
 import { requireSession } from "@/auth/session";
-import { createCampaign, setCampaignControlFlag } from "@/services/campaign-service";
+import { createCampaign, setCampaignControlFlag, deleteCampaign } from "@/services/campaign-service";
 import { logAudit } from "@/services/audit-service";
 import { startCampaignRunner } from "@/server/campaign-runner";
 import { isRateLimited } from "@/server/rate-limiter";
 import { listSmtpAccounts } from "@/services/smtp-service";
-import {
-  buildSendPlan,
-  buildUncappedAllocations,
-  toPlannerAccount,
-  projectAccountCapacityTimeline,
-} from "@/services/send-planner";
+import { capForAge, toPlannerAccount, projectAccountCapacityTimeline } from "@/services/send-planner";
 import { planNewRollout } from "@/services/rollout-planner";
+import { prisma } from "@/database/prisma";
 
 const createCampaignSchema = z.object({
   subject: z.string().min(1).max(300),
@@ -28,7 +24,8 @@ const createCampaignSchema = z.object({
       }),
     )
     .min(1),
-  accountIds: z.array(z.string()).min(1, "Select at least one email account to send from"),
+  accountId: z.string().min(1, "Select an email account to send from"),
+  dailyCap: z.number().int().min(1, "Enter how many to send per day"),
   useFixedPace: z.boolean().default(false),
 });
 
@@ -39,20 +36,14 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
   }
 
   const parsed = createCampaignSchema.parse(input);
-  const hasPersonalization = /\{(name|business ?name|owner|owner ?name|first ?name|fname)\}/i.test(
-    parsed.subject + parsed.bodyHtml,
-  );
-  // Re-filter to exactly the accounts the user had checked in the SendPlanPanel —
-  // never silently fall back to "all active accounts" at send time.
-  const allAccounts = await listSmtpAccounts(session.user.id);
-  const selectedAccounts = allAccounts.filter((a) => parsed.accountIds.includes(a.id)).map(toPlannerAccount);
 
-  // useFixedPace is an explicit opt-out of the daily ramp-cap "brain" — every
-  // recipient goes out today, round-robin across selected accounts, at a
-  // flat 5s gap, regardless of account age/daily caps.
-  const accountAllocations = parsed.useFixedPace
-    ? buildUncappedAllocations(parsed.recipients.length, selectedAccounts)
-    : buildSendPlan(parsed.recipients.length, selectedAccounts, { hasPersonalization }).allocations;
+  // Re-verify the chosen account actually belongs to this user — never trust
+  // the client-supplied accountId on its own.
+  const allAccounts = await listSmtpAccounts(session.user.id);
+  const account = allAccounts.find((a) => a.id === parsed.accountId);
+  if (!account) {
+    throw new Error("Selected email account not found");
+  }
 
   const { campaign, skippedUnsubscribed } = await createCampaign({
     userId: session.user.id,
@@ -60,8 +51,14 @@ export async function createAndStartCampaignAction(input: z.infer<typeof createC
     bodyHtml: parsed.bodyHtml,
     bodyText: parsed.bodyText,
     recipients: parsed.recipients,
-    accountAllocations,
+    accountAllocations: [{ accountId: parsed.accountId, count: parsed.dailyCap }],
     fixedDelaySeconds: parsed.useFixedPace ? 5 : undefined,
+  });
+
+  // Bookkeeping only — the schedule itself was already fully decided above.
+  await prisma.campaign.update({
+    where: { id: campaign.id },
+    data: { smtpAccountId: parsed.accountId, dailyCap: parsed.dailyCap },
   });
 
   await logAudit(session.user.id, "campaign.create", { type: "campaign", id: campaign.id });
@@ -76,33 +73,20 @@ export async function listAccountsForPlanningAction() {
   return listSmtpAccounts(session.user.id);
 }
 
-const sendPlanSchema = z.object({
-  recipientCount: z.number().int().min(0),
-  hasPersonalization: z.boolean(),
-  accountIds: z.array(z.string()).default([]),
-  useFixedPace: z.boolean().default(false),
-});
+const suggestedCapSchema = z.object({ accountId: z.string().min(1) });
 
-export async function getSendPlanAction(input: z.infer<typeof sendPlanSchema>) {
+/** Pure informational suggestion — never applied automatically. */
+export async function getSuggestedDailyCapAction(input: z.infer<typeof suggestedCapSchema>) {
   const session = await requireSession();
-  const { recipientCount, hasPersonalization, accountIds, useFixedPace } = sendPlanSchema.parse(input);
-  const allAccounts = await listSmtpAccounts(session.user.id);
-  const selected = allAccounts.filter((a) => accountIds.includes(a.id)).map(toPlannerAccount);
-
-  if (useFixedPace) {
-    const allocations = buildUncappedAllocations(recipientCount, selected);
-    return {
-      totalRecipients: recipientCount,
-      estimatedDays: allocations.length > 0 ? 1 : 0,
-      allocations,
-      warnings:
-        allocations.length > 0
-          ? ["Ignoring daily send caps — every recipient sends today regardless of account age."]
-          : ["You have no active email accounts connected — add one in Settings before sending."],
-    };
-  }
-
-  return buildSendPlan(recipientCount, selected, { hasPersonalization });
+  const { accountId } = suggestedCapSchema.parse(input);
+  const accounts = await listSmtpAccounts(session.user.id);
+  const account = accounts.find((a) => a.id === accountId);
+  if (!account) return null;
+  const planner = toPlannerAccount(account);
+  return {
+    ageDays: planner.ageDays,
+    suggestedDailyCap: planner.dailyCapOverride ?? capForAge(planner.ageDays),
+  };
 }
 
 const rolloutPlanSchema = z.object({ totalRecipients: z.number().int().min(1) });
@@ -137,6 +121,18 @@ export async function setCampaignControlAction(input: z.infer<typeof controlSche
   if (parsed.flag === "none") {
     void startCampaignRunner(parsed.campaignId);
   }
+
+  return { ok: true };
+}
+
+const deleteSchema = z.object({ campaignId: z.string().min(1) });
+
+export async function deleteCampaignAction(input: z.infer<typeof deleteSchema>) {
+  const session = await requireSession();
+  const { campaignId } = deleteSchema.parse(input);
+
+  await deleteCampaign(session.user.id, campaignId);
+  await logAudit(session.user.id, "campaign.delete", { type: "campaign", id: campaignId });
 
   return { ok: true };
 }

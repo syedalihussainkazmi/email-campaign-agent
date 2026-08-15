@@ -18,3 +18,15 @@ export const panelVariants: Variants = {
 };
 
 export const progressBarTransition: Transition = { duration: 0.5, ease: EASE_OUT };
+
+/** Parent wrapper for a list of cards — staggers children in on mount. */
+export const staggerContainer: Variants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.05 } },
+};
+
+/** Individual list item entrance, used inside a staggerContainer. */
+export const staggerItem: Variants = {
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: EASE_OUT } },
+};
