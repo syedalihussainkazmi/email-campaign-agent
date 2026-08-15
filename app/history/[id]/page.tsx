@@ -5,6 +5,7 @@ import { AuthedShell } from "@/components/layout/authed-shell";
 import { getCampaignDetail } from "@/services/campaign-service";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { CampaignActionsBar } from "@/components/campaign/campaign-actions-bar";
 
 const CAMPAIGN_STATUS_VARIANT = {
   draft: "default",
@@ -56,7 +57,10 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 {campaign.completedAt && ` · Completed ${campaign.completedAt.toLocaleString()}`}
               </CardDescription>
             </div>
-            <Badge variant={CAMPAIGN_STATUS_VARIANT[campaign.status]}>{campaign.status}</Badge>
+            <div className="flex items-center gap-3">
+              <Badge variant={CAMPAIGN_STATUS_VARIANT[campaign.status]}>{campaign.status}</Badge>
+              <CampaignActionsBar campaignId={campaign.id} status={campaign.status} />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-8">

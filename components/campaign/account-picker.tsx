@@ -28,10 +28,10 @@ export function AccountPicker({ accountId, onAccountChange, dailyCap, onDailyCap
   }, []);
 
   useEffect(() => {
-    if (!accountId) {
-      setSuggestion(null);
-      return;
-    }
+    // accountId is only ever empty before the account list has loaded (the
+    // other effect above), never cleared afterward by any UI action — so
+    // there's nothing to reset synchronously here, only a fetch to skip.
+    if (!accountId) return;
     getSuggestedDailyCapAction({ accountId }).then(setSuggestion);
   }, [accountId]);
 
