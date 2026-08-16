@@ -27,16 +27,23 @@ export function EmailEditor({ subject, onSubjectChange, body, onBodyChange }: Em
       <Textarea
         placeholder={
           "Write your email… Use {name} or {business name} for the business, " +
-          '{owner name} for the contact\'s name (falls back to "there" if unknown).'
+          '{owner name} for the contact\'s name (falls back to "there" if unknown — ' +
+          "write your own fallback with {owner name|friend})."
         }
         rows={10}
         value={body}
         onChange={(e) => onBodyChange(e.target.value)}
       />
-      <div className="flex gap-4 text-xs text-zinc-500">
-        <span>{characterCount} characters</span>
-        <span>~{readTimeMinutes} min read</span>
-        <span>Your saved signature is appended automatically</span>
+      <div className="flex flex-col gap-1 text-xs text-zinc-500">
+        <div className="flex gap-4">
+          <span>{characterCount} characters</span>
+          <span>~{readTimeMinutes} min read</span>
+          <span>Your saved signature is appended automatically</span>
+        </div>
+        <p>
+          Add a pipe to set your own fallback for a missing name — <code>{"{owner name|friend}"}</code>{" "}
+          or <code>{"{business name|your business}"}</code> — instead of the default &quot;there&quot;.
+        </p>
       </div>
     </div>
   );
